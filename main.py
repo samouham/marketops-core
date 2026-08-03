@@ -207,3 +207,37 @@ def api_generate_pdf(payload: dict):
 def api_generate_artifact(payload: dict):
     """Alias for PDF generation matching legacy frontend routes."""
     return api_generate_pdf(payload)
+
+from fastapi import Request
+from fastapi.responses import Response
+
+@app.api_route("/api/generate-artifact", methods=["GET", "POST"])
+async def generate_artifact(request: Request):
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+    else:
+        params = request.query_params
+        payload = {
+            "summary": {
+                "scan_status": "COMPLETE",
+                "total_findings": int(params.get("drift", 0)),
+                "projected_annual_recovery_usd": float(params.get("recovery", 0))
+            },
+            "telemetry": {
+                "drift_detected": int(params.get("drift", 0)),
+                "annualized_recovery": float(params.get("recovery", 0))
+            }
+        }
+
+    try:
+        pdf_bytes = generate_audit_pdf(payload)
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "attachment; filename=sovereign-audit-report.pdf"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
