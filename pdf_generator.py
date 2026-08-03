@@ -20,7 +20,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story = []
     styles = getSampleStyleSheet()
     
-    # Extract data securely with fallbacks
     summary = payload.get("summary", {})
     telemetry = payload.get("telemetry", {})
     findings = payload.get("findings", [])
@@ -64,7 +63,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
         textColor=colors.HexColor('#334155')
     )
 
-    # PAGE 1: Cover / Executive Summary
     story.append(Paragraph(f"SOVEREIGN-28 APEX OMNI ARTIFACT | PRINCIPAL: {principal}", header_style))
     story.append(Paragraph("AUTHORITY STATEMENT: Multi-Region Global Forensic sweep | FTR/SOC2 Aligned.", header_style))
     story.append(Paragraph(f"FORENSIC SEAL (SHA-384): {seal_hash}", header_style))
@@ -72,7 +70,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(Spacer(1, 15))
 
     story.append(Paragraph("Master Gold v210.12 | Chain of Custody Verified | Page 1 FORENSIC NODE", title_style))
-    story.append(Paragraph(f"\", ParagraphStyle('BigNum', parent=title_style, fontSize=28, textColor=colors.HexColor('#16a34a'))))
+    story.append(Paragraph(f"", ParagraphStyle('BigNum', parent=title_style, fontSize=28, textColor=colors.HexColor('#16a34a'))))
     story.append(Paragraph("ANNUALIZED BILLABLE RECOVERY", header_style))
     story.append(Spacer(1, 10))
 
@@ -86,7 +84,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(Paragraph("SCOPE: (EC2, EBS, RDS, ECR, ECS, KMS, SecretMgr, Lambda, WAF, Config, Trail, SG).", body_style))
     story.append(PageBreak())
 
-    # PAGE 2: Glossary
     story.append(Paragraph("1.0 INSTITUTIONAL FIELD GLOSSARY (F1-F28)", title_style))
     glossary_data = [
         ["Field", "Institutional Forensic Audit Definition & Business Logic Coverage"],
@@ -110,7 +107,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t)
     story.append(PageBreak())
 
-    # PAGE 3: Interpretation
     story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION", title_style))
     story.append(Paragraph(
         "This artifact represents a deterministic validation of the target AWS Organization's compliance with FTR and SOC2 "
@@ -122,7 +118,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     ))
     story.append(PageBreak())
 
-    # PAGE 4: Findings Details
     story.append(Paragraph("3.0 ISOLATED DRIFT VECTORS & REMEDIATION", title_style))
     if findings:
         for f in findings:
