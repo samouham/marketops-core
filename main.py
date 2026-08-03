@@ -191,3 +191,14 @@ if __name__ == "__main__":
 def root_check():
     return {'status': 'active', 'service': 'sovereign-core'}
 
+
+from pdf_generator import generate_audit_pdf
+from fastapi.responses import Response
+
+@app.post('/api/generate-pdf')
+def api_generate_pdf(payload: dict):
+    try:
+        pdf_bytes = generate_audit_pdf(payload)
+        return Response(content=pdf_bytes, media_type='application/pdf', headers={'Content-Disposition': 'attachment; filename=sovereign-audit-report.pdf'})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
