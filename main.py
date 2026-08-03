@@ -187,3 +187,7 @@ def execute_full_audit(regions=None):
 if __name__ == "__main__":
     active_regions = get_all_active_regions()
     execute_full_audit(active_regions)
+@app.get('/')
+def root_check():
+    return {'status': 'active', 'service': 'sovereign-core'}
+
