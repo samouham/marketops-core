@@ -42,7 +42,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     )
 
     # Native PDF Metadata Properties
-    doc.title = "Sovereign-28 Apex Omni Artifact v210.14"
+    doc.title = "Sovereign-28 Apex Omni Artifact v210.15"
     doc.author = "MarketOps Cloud - Forensic Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
@@ -174,7 +174,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", summary.get("captured_at", datetime.now(timezone.utc).isoformat()))
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = "Sovereign-28 Forensic Engine v210.14"
+    engine_version = "Sovereign-28 Forensic Engine v210.15"
     schema_version = "SO28-1.0"
     
     # Deterministic Evidence Envelope Seal
@@ -323,9 +323,9 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_custody)
     story.append(Spacer(1, 8))
 
-    # KPI Block (Annualized Billable Recovery)
+    # KPI Block (Annualized Billable Recovery) with properly scaled USD suffix to prevent overlap
     kpi_content = [
-        Paragraph(f"<b> USD</b>", kpi_style),
+        Paragraph(f"<b> <font size=11 color='#15803d'>USD</font></b>", kpi_style),
         Paragraph("PROJECTED ANNUALIZED BILLABLE RECOVERY", kpi_sub_style)
     ]
     t_kpi = Table([[kpi_content]], colWidths=[540])
