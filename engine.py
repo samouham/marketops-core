@@ -11,3 +11,14 @@ ec2_client = boto3.client('ec2', config=prm_config)
 s3_client = boto3.client('s3', config=prm_config)
 iam_client = boto3.client('iam', config=prm_config)
 sts_client = boto3.client('sts', config=prm_config)
+
+def get_client(service_name: str, region_name: str = None):
+    """
+    Helper factory function to guarantee every dynamically created 
+    client automatically inherits your APN PRM configuration.
+    """
+    return boto3.client(
+        service_name,
+        region_name=region_name,
+        config=prm_config
+    )
