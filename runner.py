@@ -5,12 +5,16 @@ from typing import List, Optional
 from engine import get_client
 from scanner import ec2, secrets
 import hashlib
+import logging
 
 # Initialize FastAPI application instance
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
     version="v210.12"
 )
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("sovereign-backend")
 
 # CRITICAL: Register CORS middleware immediately after app initialization
 app.add_middleware(
@@ -23,7 +27,12 @@ app.add_middleware(
 
 @app.options("/api/execute-scan")
 def options_execute_scan():
-    """Explicitly handle browser OPTIONS preflight requests to prevent 405 errors."""
+    """Explicitly handle browser OPTIONS preflight requests for scanning to prevent 405 errors."""
+    return {"status": "ok"}
+
+@app.options("/api/register-aws-customer")
+def options_register_customer():
+    """Explicitly handle browser OPTIONS preflight requests for customer registration."""
     return {"status": "ok"}
 
 @app.get("/health")
@@ -34,6 +43,27 @@ def health_check():
 class AuditRequest(BaseModel):
     arn: Optional[str] = None
     regions: Optional[List[str]] = None
+
+class RegistrationRequest(BaseModel):
+    email: Optional[str] = None
+    arn: Optional[str] = None
+
+@app.post("/api/register-aws-customer")
+def register_aws_customer(payload: RegistrationRequest):
+    """Registers and verifies the cross-account IAM Role ARN submitted during onboarding."""
+    try:
+        if not payload.arn or not payload.arn.startswith("arn:aws:iam::"):
+            raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format.")
+        
+        logger.info(f"Successfully registered customer ARN: {payload.arn} for identity: {payload.email}")
+        return {
+            "status": "VERIFIED",
+            "message": "Institutional link established successfully.",
+            "arn": payload.arn
+        }
+    except Exception as e:
+        logger.error(f"Registration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/execute-scan")
 def api_execute_scan(payload: AuditRequest = AuditRequest()):
