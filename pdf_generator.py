@@ -5,10 +5,6 @@ from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
 def normalize_payload(payload: dict) -> dict:
-    ""\"
-    Backward-compatible auto-healing normalizer. Converts legacy or flat scanner 
-    payloads into a fully compliant SO28EvidenceEnvelope structure on the fly.
-    ""\"
     if not isinstance(payload, dict):
         payload = {}
 
@@ -16,7 +12,6 @@ def normalize_payload(payload: dict) -> dict:
     payload.setdefault("scan_execution_id", payload.get("execution_id") or "SCAN-LEGACY")
     payload.setdefault("captured_at", payload.get("captured_at") or datetime.now(timezone.utc).isoformat())
 
-    # Auto-heal identity
     identity = payload.get("identity")
     if not isinstance(identity, dict):
         identity = {}
@@ -25,7 +20,6 @@ def normalize_payload(payload: dict) -> dict:
     identity.setdefault("organization_id", payload.get("organization_id") or "NOT PROVIDED")
     payload["identity"] = identity
 
-    # Auto-heal scan_scope
     scan_scope = payload.get("scan_scope")
     if not isinstance(scan_scope, dict):
         scan_scope = {}
@@ -33,7 +27,6 @@ def normalize_payload(payload: dict) -> dict:
     scan_scope.setdefault("services_evaluated", payload.get("services_scanned") or scan_scope.get("services_scanned") or [])
     payload["scan_scope"] = scan_scope
 
-    # Auto-heal summary
     summary = payload.get("summary")
     if not isinstance(summary, dict):
         summary = {}
@@ -41,7 +34,6 @@ def normalize_payload(payload: dict) -> dict:
     summary.setdefault("total_findings", len(raw_findings))
     payload["summary"] = summary
 
-    # Auto-heal evidence_state
     evidence_state = payload.get("evidence_state")
     if not isinstance(evidence_state, dict):
         evidence_state = {}
@@ -50,13 +42,14 @@ def normalize_payload(payload: dict) -> dict:
     evidence_state.setdefault("finding_objects_present", bool(raw_findings))
     payload["evidence_state"] = evidence_state
 
-    # Ensure findings exist at root
     if "findings" not in payload and "drift_vectors" in payload:
         payload["findings"] = payload["drift_vectors"]
 
     return payload
 
 def add_header_footer(canvas, doc):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors
     canvas.saveState()
     canvas.setFont('Helvetica-Bold', 7)
     canvas.setFillColor(colors.HexColor('#0f172a'))
@@ -82,7 +75,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=70, bottomMargin=60)
 
-    doc.title = "Sovereign-28 Apex Omni Artifact v211.1"
+    doc.title = "Sovereign-28 Apex Omni Artifact v211.2"
     doc.author = "MarketOps Cloud - Forensic Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
@@ -132,7 +125,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", datetime.now(timezone.utc).isoformat())
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.1")
+    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.2")
     schema_version = payload.get("schema_version", "SO28-1.0")
     scan_execution_id = payload.get("scan_execution_id", "SCAN-UNKNOWN")
     
