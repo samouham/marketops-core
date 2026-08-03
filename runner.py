@@ -21,12 +21,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.options("/api/execute-scan")
+def options_execute_scan():
+    """Explicitly handle browser OPTIONS preflight requests to prevent 405 errors."""
+    return {"status": "ok"}
+
 @app.get("/health")
 def health_check():
     """Kubernetes / App Runner health check probe."""
     return {"status": "healthy", "service": "sovereign-backend-engine-v2"}
 
 class AuditRequest(BaseModel):
+    arn: Optional[str] = None
     regions: Optional[List[str]] = None
 
 @app.post("/api/execute-scan")
@@ -85,7 +91,7 @@ def execute_full_audit(regions=None):
         raise RuntimeError("CRITICAL FAULT: Region discovery yielded zero targets.")
 
     print("==================================================")
-    print("      MARKETOPS CLOUD - AUDIT EXECUTION ENGINE    ")
+    print("        MARKETOPS CLOUD - AUDIT EXECUTION ENGINE    ")
     print("==================================================\n")
 
     successful_regions = []
