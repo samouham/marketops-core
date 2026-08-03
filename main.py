@@ -202,3 +202,8 @@ def api_generate_pdf(payload: dict):
         return Response(content=pdf_bytes, media_type='application/pdf', headers={'Content-Disposition': 'attachment; filename=sovereign-audit-report.pdf'})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post('/api/generate-artifact')
+def api_generate_artifact(payload: dict):
+    """Alias for PDF generation matching legacy frontend routes."""
+    return api_generate_pdf(payload)
