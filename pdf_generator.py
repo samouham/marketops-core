@@ -12,7 +12,6 @@ def add_header_footer(canvas, doc):
     canvas.setFont('Helvetica-Bold', 7)
     canvas.setFillColor(colors.HexColor('#0f172a'))
     
-    # Dynamic relative positioning using letter dimensions (612 x 792)
     width, height = letter
     
     # Top Header Banner
@@ -44,7 +43,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story = []
     styles = getSampleStyleSheet()
     
-    # Extract payload data securely
     summary = payload.get("summary", {})
     telemetry = payload.get("telemetry", {})
     findings = payload.get("findings", []) or payload.get("drift_vectors", []) or payload.get("audit_findings", [])
@@ -58,12 +56,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     except (ValueError, TypeError):
         recovery = 0.0
     
-    # Separate timestamps for evidence capture vs artifact generation
     evidence_timestamp = payload.get("captured_at", summary.get("captured_at", datetime.now(timezone.utc).isoformat()))
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
     engine_version = "Master Gold v210.12"
     
-    # Fail-closed canonical SHA-384 metadata seal
     artifact_metadata = {
         "payload": payload,
         "evidence_captured_at": evidence_timestamp,
@@ -73,7 +69,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
     canonical_json = json.dumps(artifact_metadata, sort_keys=True, default=str, separators=(",", ":"))
     seal_hash = hashlib.sha384(canonical_json.encode("utf-8")).hexdigest().upper()
 
-    # Typography Styles
     title_style = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
@@ -120,7 +115,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         alignment=1
     )
 
-    # ================= PAGE 1: APEX OMNI IDENTITY & COVER =================
+    # PAGE 1: COVER
     story.append(Paragraph("SOVEREIGN-28 APEX OMNI ARTIFACT", title_style))
     story.append(Paragraph("Institutional Forensic Control Plane & Governance Verification", ParagraphStyle('SubTitle', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
     story.append(Spacer(1, 8))
@@ -144,9 +139,8 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_custody)
     story.append(Spacer(1, 10))
 
-    # KPI Block (Annualized Billable Recovery)
     kpi_content = [
-        Paragraph(f"<b>\ USD</b>", kpi_style),
+        Paragraph(f"<b> USD</b>", kpi_style),
         Spacer(1, 2),
         Paragraph("<font size=8 color='#64748b'><b>PROJECTED ANNUALIZED BILLABLE RECOVERY</b></font>", ParagraphStyle('KPISub', parent=body_style, alignment=1))
     ]
@@ -160,13 +154,12 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_kpi)
     story.append(Spacer(1, 10))
 
-    # Executive Metrics Summary Table
     metrics_data = [
         ["Evaluation Metric", "Institutional Result"],
         ["Drift Vectors Isolated", str(total_findings)],
         ["Regions Evaluated", str(summary.get("regions_evaluated", len(summary.get("scanned_regions", ["us-east-1"]))))],
         ["Services Evaluated", "12 (EC2, EBS, RDS, ECR, ECS, KMS, SecretMgr, Lambda, WAF, Config, Trail, SG)"],
-        ["Projected Recovery", f"\ USD"]
+        ["Projected Recovery", f" USD"]
     ]
     t_metrics = Table(metrics_data, colWidths=[180, 360])
     t_metrics.setStyle(TableStyle([
@@ -205,7 +198,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_method)
     story.append(PageBreak())
 
-    # ================= PAGE 2: F1-F28 GLOSSARY =================
+    # PAGE 2: GLOSSARY
     story.append(Paragraph("1.0 INSTITUTIONAL FIELD GLOSSARY (F1-F28)", title_style))
     story.append(Spacer(1, 4))
     
@@ -233,7 +226,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_glossary)
     story.append(PageBreak())
 
-    # ================= PAGE 3: EXECUTIVE INTERPRETATION =================
+    # PAGE 3: INTERPRETATION
     story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION", title_style))
     story.append(Spacer(1, 6))
     
@@ -252,7 +245,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_interp)
     story.append(PageBreak())
 
-    # ================= PAGE 4+: FINDINGS TABLES & CARDS =================
+    # PAGE 4+: FINDINGS
     story.append(Paragraph("3.0 ISOLATED DRIFT VECTORS & REMEDIATION MATRIX", title_style))
     story.append(Spacer(1, 6))
 
@@ -268,7 +261,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
             fix_cli = f.get('fix_cli') or f.get('fix') or f.get('remediation') or f.get('CliCommand') or f"aws resource-group remediate --resource-id {resid}"
             
             try:
-                mat_str = f"\"
+                mat_str = f""
             except (ValueError, TypeError):
                 mat_str = str(materiality)
 
