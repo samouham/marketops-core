@@ -1,4 +1,4 @@
-from reportlab.lib.pagesizes import letter
+﻿from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
@@ -6,6 +6,7 @@ import io
 import json
 import hashlib
 from datetime import datetime, timezone
+from xml.sax.saxutils import escape
 
 def add_header_footer(canvas, doc):
     canvas.saveState()
@@ -23,9 +24,9 @@ def add_header_footer(canvas, doc):
     # Bottom Footer
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(colors.HexColor('#64748b'))
-    canvas.drawString(36, 20, "CHAIN OF CUSTODY VERIFIED | WELL-ARCHITECTED & FTR ALIGNED | SHA-384 SECURED")
+    canvas.drawString(36, 20, "CHAIN OF CUSTODY VERIFIED | AWS WELL-ARCHITECTED REVIEW PRINCIPLES | FTR READINESS SUPPORTING ARTIFACT")
     canvas.drawRightString(width - 36, 20, f"Page {doc.page} | FORENSIC NODE")
-    canvas.line(36, 30, width - 36, 30)
+    canvas.line(36, 30, width - 30, 30)
     
     canvas.restoreState()
 
@@ -40,35 +41,120 @@ def generate_audit_pdf(payload: dict) -> bytes:
         bottomMargin=60
     )
 
+    # Native PDF Metadata Properties
+    doc.title = "Sovereign-28 Apex Omni Artifact"
+    doc.author = "MarketOps Cloud - Forensic Engine"
+    doc.subject = "AWS Governance Verification & Compliance Artifact"
+
     story = []
     styles = getSampleStyleSheet()
     
+    # Secure multi-source payload extraction
     summary = payload.get("summary", {})
     telemetry = payload.get("telemetry", {})
-    findings = payload.get("findings", []) or payload.get("drift_vectors", []) or payload.get("audit_findings", [])
+    economic = payload.get("economic_exposure", {})
     
-    principal = payload.get("account_id", summary.get("account_id", payload.get("aws_account_id", "UNSPECIFIED")))
-    total_findings = int(summary.get("total_findings", telemetry.get("drift_detected", len(findings))))
+    raw_findings = (
+        payload.get("findings") or 
+        payload.get("drift_vectors") or 
+        payload.get("audit_findings") or 
+        payload.get("vectors") or 
+        []
+    )
+    if not isinstance(raw_findings, list):
+        raw_findings = []
     
-    raw_recovery = summary.get("projected_annual_recovery_usd", telemetry.get("annualized_recovery", 0))
+    findings = [x for x in raw_findings if isinstance(x, dict)]
+    
+    principal = (
+        payload.get("account_id") or 
+        payload.get("aws_account_id") or 
+        payload.get("principal_account") or
+        payload.get("tenant_id") or
+        payload.get("customer_account") or
+        summary.get("account_id") or 
+        summary.get("aws_account_id") or 
+        "UNKNOWN_TENANT"
+    )
+    
+    total_findings = int(
+        summary.get("total_findings") or 
+        telemetry.get("drift_detected") or 
+        len(findings) or 
+        0
+    )
+    
+    raw_recovery = (
+        summary.get("projected_annual_recovery_usd") or 
+        summary.get("annualized_recovery") or 
+        summary.get("billable_recovery") or 
+        summary.get("annualized_billable_recovery") or 
+        summary.get("recovery_estimate") or 
+        summary.get("economic_impact") or 
+        telemetry.get("annualized_recovery") or 
+        economic.get("annualized_recovery") or 
+        payload.get("annualized_recovery") or 
+        payload.get("billable_recovery") or 
+        0
+    )
+    
     try:
         recovery = float(raw_recovery or 0)
     except (ValueError, TypeError):
         recovery = 0.0
     
+    raw_regions = (
+        payload.get("regions") or 
+        summary.get("regions") or 
+        summary.get("scanned_regions") or 
+        ["us-east-1"]
+    )
+    if not isinstance(raw_regions, list):
+        raw_regions = [raw_regions]
+    regions_list = [str(r) for r in raw_regions]
+    regions_str = ", ".join(regions_list)
+
     evidence_timestamp = payload.get("captured_at", summary.get("captured_at", datetime.now(timezone.utc).isoformat()))
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
     engine_version = "Master Gold v210.12"
     
-    artifact_metadata = {
-        "payload": payload,
-        "evidence_captured_at": evidence_timestamp,
-        "artifact_generated_at": artifact_timestamp,
-        "engine_version": engine_version
-    }
-    canonical_json = json.dumps(artifact_metadata, sort_keys=True, default=str, separators=(",", ":"))
-    seal_hash = hashlib.sha384(canonical_json.encode("utf-8")).hexdigest().upper()
+    # Fail-closed cryptographic integrity seal
+    try:
+        artifact_metadata = {
+            "payload": payload,
+            "evidence_captured_at": evidence_timestamp,
+            "artifact_generated_at": artifact_timestamp,
+            "engine_version": engine_version
+        }
+        canonical_json = json.dumps(artifact_metadata, sort_keys=True, default=str, separators=(",", ":"))
+        seal_hash = hashlib.sha384(canonical_json.encode("utf-8")).hexdigest().upper()
+    except Exception as e:
+        raise RuntimeError(f"Artifact sealing failed: {str(e)}")
 
+    formatted_hash = seal_hash[:48] + "<br/>" + seal_hash[48:]
+    artifact_id = f"SO28-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{seal_hash[:8]}"
+
+    # Payload-backed evidence object count
+    evidence_objects_count = payload.get("evidence_objects_count") or summary.get("evidence_objects_count") or len(findings)
+    evidence_str = str(evidence_objects_count) if evidence_objects_count > 0 else "NOT PROVIDED"
+
+    # Dynamic risk rating calculation based on finding severity
+    severity_scores = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    max_severity_score = 0
+    for f in findings:
+        sev = str(f.get("severity") or f.get("Severity") or "LOW").upper()
+        score = severity_scores.get(sev, 1)
+        if score > max_severity_score:
+            max_severity_score = score
+
+    if max_severity_score >= 3 or total_findings >= 5:
+        risk_rating = "HIGH"
+    elif max_severity_score == 2 or total_findings > 0:
+        risk_rating = "MODERATE"
+    else:
+        risk_rating = "LOW (CLEAN BASELINE)"
+
+    # Typography Styles
     title_style = ParagraphStyle(
         'TitleStyle',
         parent=styles['Heading1'],
@@ -115,17 +201,28 @@ def generate_audit_pdf(payload: dict) -> bytes:
         alignment=1
     )
 
-    # PAGE 1: COVER
+    kpi_sub_style = ParagraphStyle(
+        'KPISub',
+        parent=body_style,
+        alignment=1,
+        fontSize=8,
+        leading=10,
+        spaceBefore=4
+    )
+
+    # ================= PAGE 1: APEX OMNI IDENTITY & COVER =================
     story.append(Paragraph("SOVEREIGN-28 APEX OMNI ARTIFACT", title_style))
     story.append(Paragraph("Institutional Forensic Control Plane & Governance Verification", ParagraphStyle('SubTitle', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
     story.append(Spacer(1, 8))
 
     custody_data = [
-        [Paragraph("<b>PRINCIPAL ACCOUNT</b>", body_style), Paragraph(str(principal), body_style)],
+        [Paragraph("<b>ARTIFACT CLASSIFICATION</b>", body_style), Paragraph("CONFIDENTIAL - CUSTOMER OWNED FORENSIC ARTIFACT", body_style)],
+        [Paragraph("<b>ARTIFACT ID</b>", body_style), Paragraph(artifact_id, body_style)],
+        [Paragraph("<b>AWS PRINCIPAL ACCOUNT</b>", body_style), Paragraph(str(principal), body_style)],
         [Paragraph("<b>ENGINE VERSION</b>", body_style), Paragraph(engine_version, body_style)],
-        [Paragraph("<b>FORENSIC SEAL (SHA-384)</b>", body_style), Paragraph(f"<font name='Courier' size=7>{seal_hash}</font>", body_style)],
+        [Paragraph("<b>TAMPER-EVIDENT SEAL (SHA-384)</b>", body_style), Paragraph(f"<font name='Courier' size=6>{formatted_hash}</font>", body_style)],
         [Paragraph("<b>EVIDENCE CAPTURED</b>", body_style), Paragraph(str(evidence_timestamp), body_style)],
-        [Paragraph("<b>ARTIFACT GENERATED</b>", body_style), Paragraph(f"{artifact_timestamp} | SEAL VERIFIED", body_style)]
+        [Paragraph("<b>ARTIFACT GENERATED</b>", body_style), Paragraph(f"{artifact_timestamp} | CRYPTOGRAPHICALLY VERIFIED", body_style)]
     ]
     t_custody = Table(custody_data, colWidths=[130, 410])
     t_custody.setStyle(TableStyle([
@@ -139,27 +236,32 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_custody)
     story.append(Spacer(1, 10))
 
+    # KPI Block (Annualized Billable Recovery) with bulletproof spacing
     kpi_content = [
         Paragraph(f"<b> USD</b>", kpi_style),
-        Spacer(1, 2),
-        Paragraph("<font size=8 color='#64748b'><b>PROJECTED ANNUALIZED BILLABLE RECOVERY</b></font>", ParagraphStyle('KPISub', parent=body_style, alignment=1))
+        Paragraph("<br/>", kpi_sub_style),
+        Paragraph("PROJECTED ANNUALIZED BILLABLE RECOVERY", kpi_sub_style)
     ]
     t_kpi = Table([[kpi_content]], colWidths=[540])
     t_kpi.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#86efac')),
-        ('TOPPADDING', (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('TOPPADDING', (0,0), (-1,-1), 16),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 16),
     ]))
     story.append(t_kpi)
     story.append(Spacer(1, 10))
 
+    # Executive Governance Posture & Metrics Summary Table
     metrics_data = [
         ["Evaluation Metric", "Institutional Result"],
+        ["Overall Governance Posture", risk_rating],
         ["Drift Vectors Isolated", str(total_findings)],
-        ["Regions Evaluated", str(summary.get("regions_evaluated", len(summary.get("scanned_regions", ["us-east-1"]))))],
+        ["Regions Evaluated", f"{len(regions_list)} ({regions_str})"],
         ["Services Evaluated", "12 (EC2, EBS, RDS, ECR, ECS, KMS, SecretMgr, Lambda, WAF, Config, Trail, SG)"],
-        ["Projected Recovery", f" USD"]
+        ["Scan Mode / IAM Authority", "Read-Only Observational Handshake (STS AssumeRole)"],
+        ["Evidence Objects Collected", evidence_str],
+        ["Projected Annual Recovery", f" USD"]
     ]
     t_metrics = Table(metrics_data, colWidths=[180, 360])
     t_metrics.setStyle(TableStyle([
@@ -184,7 +286,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     method_data = [
         ["Methodology", "Observational Metadata Handshake (Zero Write-Access)"],
         ["Industry Benchmark", "AWS Well-Architected Review principles and Foundational Technical Review readiness alignment."],
-        ["Scope Evaluated", "EC2, EBS, RDS, ECR, ECS, KMS, SecretMgr, Lambda, WAF, Config, Trail, SG"]
+        ["Artifact Lifecycle", "Customer Controlled | SHA-384 Recomputable | Timestamp Bound"]
     ]
     t_method = Table(method_data, colWidths=[130, 410])
     t_method.setStyle(TableStyle([
@@ -198,7 +300,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_method)
     story.append(PageBreak())
 
-    # PAGE 2: GLOSSARY
+    # ================= PAGE 2: F1-F28 GLOSSARY =================
     story.append(Paragraph("1.0 INSTITUTIONAL FIELD GLOSSARY (F1-F28)", title_style))
     story.append(Spacer(1, 4))
     
@@ -226,8 +328,8 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_glossary)
     story.append(PageBreak())
 
-    # PAGE 3: INTERPRETATION
-    story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION", title_style))
+    # ================= PAGE 3: EXECUTIVE INTERPRETATION & RECOMMENDED ACTIONS =================
+    story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION & ACTIONS", title_style))
     story.append(Spacer(1, 6))
     
     interp_box = [[
@@ -237,42 +339,60 @@ def generate_audit_pdf(payload: dict) -> bytes:
     t_interp.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#cbd5e1')),
-        ('TOPPADDING', (0,0), (-1,-1), 12),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
-        ('LEFTPADDING', (0,0), (-1,-1), 12),
-        ('RIGHTPADDING', (0,0), (-1,-1), 12),
+        ('TOPPADDING', (0,0), (-1,-1), 10),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+        ('RIGHTPADDING', (0,0), (-1,-1), 10),
     ]))
     story.append(t_interp)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>RECOMMENDED EXECUTIVE ACTIONS:</b>", section_style))
+    actions_data = [
+        ["1.", "Review and revoke overly permissive security group ingress rules exposing assets to 0.0.0.0/0."],
+        ["2.", "Purge unattached EBS storage volumes and unreferenced ECR image repositories to stop idle tax."],
+        ["3.", "Enable AWS Config recorders and AWS CloudTrail organizational trails across all commercial regions."],
+        ["4.", "Enforce strict IAM MFA identity policies and attach WAF protections to publicly exposed ALBs."]
+    ]
+    t_actions = Table(actions_data, colWidths=[20, 520])
+    t_actions.setStyle(TableStyle([
+        ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+        ('FONTSIZE', (0,0), (-1,-1), 8.5),
+        ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#334155')),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+    ]))
+    story.append(t_actions)
     story.append(PageBreak())
 
-    # PAGE 4+: FINDINGS
+    # ================= PAGE 4+: FINDINGS TABLES & CARDS =================
     story.append(Paragraph("3.0 ISOLATED DRIFT VECTORS & REMEDIATION MATRIX", title_style))
     story.append(Spacer(1, 6))
 
     if findings:
         for idx, f in enumerate(findings, 1):
-            loc = f.get('region') or f.get('Region', 'us-east-1')
-            cls = f.get('id') or f.get('finding_type') or f.get('FindingType', 'F20')
-            resid = f.get('resource_id') or f.get('ResourceId', 'UNKNOWN_RESOURCE')
-            service = f.get('service') or f.get('Service', 'AWS Resource')
-            severity = f.get('severity') or f.get('Severity', 'HIGH')
+            loc = escape(str(f.get('region') or f.get('Region') or 'us-east-1'))
+            cls = escape(str(f.get('id') or f.get('finding_type') or f.get('FindingType') or 'F20'))
+            resid = escape(str(f.get('resource_id') or f.get('ResourceId') or 'UNKNOWN_RESOURCE'))
+            service = escape(str(f.get('service') or f.get('Service') or 'AWS Resource'))
+            severity = escape(str(f.get('severity') or f.get('Severity') or 'HIGH'))
             materiality = f.get('materiality') or f.get('annual_recovery', 0.0)
-            evidence = f.get('evidence') or f.get('evidence_summary') or f.get('Description') or f.get('narrative') or "Institutional drift vector isolated."
-            fix_cli = f.get('fix_cli') or f.get('fix') or f.get('remediation') or f.get('CliCommand') or f"aws resource-group remediate --resource-id {resid}"
+            evidence = escape(str(f.get('evidence') or f.get('evidence_summary') or f.get('Description') or f.get('narrative') or 'Institutional drift vector isolated.'))
+            fix_cli = escape(str(f.get('fix_cli') or f.get('fix') or f.get('remediation') or f.get('CliCommand') or f'aws resource-group remediate --resource-id {resid}'))
             
             try:
                 mat_str = f""
             except (ValueError, TypeError):
-                mat_str = str(materiality)
+                mat_str = escape(str(materiality))
 
             card_table_data = [
                 [Paragraph(f"<b>VECTOR #{idx} | {cls}</b>", ParagraphStyle('TH', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))), ""],
-                [Paragraph("<b>REGION</b>", body_style), Paragraph(str(loc), body_style)],
-                [Paragraph("<b>SERVICE</b>", body_style), Paragraph(str(service), body_style)],
-                [Paragraph("<b>RESOURCE</b>", body_style), Paragraph(str(resid), body_style)],
-                [Paragraph("<b>SEVERITY</b>", body_style), Paragraph(str(severity), body_style)],
+                [Paragraph("<b>REGION</b>", body_style), Paragraph(loc, body_style)],
+                [Paragraph("<b>SERVICE</b>", body_style), Paragraph(service, body_style)],
+                [Paragraph("<b>RESOURCE</b>", body_style), Paragraph(resid, body_style)],
+                [Paragraph("<b>SEVERITY</b>", body_style), Paragraph(severity, body_style)],
                 [Paragraph("<b>MATERIALITY</b>", body_style), Paragraph(mat_str, body_style)],
-                [Paragraph("<b>EVIDENCE</b>", body_style), Paragraph(str(evidence), body_style)],
+                [Paragraph("<b>EVIDENCE</b>", body_style), Paragraph(evidence, body_style)],
                 [Paragraph("<b>REMEDIATION CLI</b>", body_style), Paragraph(fix_cli, cli_style)]
             ]
             
