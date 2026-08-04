@@ -4,7 +4,10 @@ from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from engine import get_client
-from scanner import ec2, secrets
+from scanner import (
+    ec2, ebs, rds, ecr, ecs, kms, secrets, 
+    lambda_scanner, waf, config_scanner, trail, security_groups
+)
 from pdf_generator import generate_audit_pdf
 import hashlib
 import json
@@ -15,7 +18,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Governance Engine",
-    version="v211.24"
+    version="v211.25"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -60,7 +63,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.24", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.25", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -121,22 +124,18 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
             },
             "scan_scope": {
                 "regions_evaluated": ["us-east-1", "us-west-2"],
-                "services_evaluated": ["EC2", "EBS", "SecretsManager"],
+                "services_evaluated": ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
                 "accounts_evaluated": ["UNKNOWN_PENDING_STS"]
             },
             "summary": {
                 "scan_status": "COMPLETE",
                 "regions_discovered": 2,
                 "regions_evaluated": 2,
-                "review_indicators_detected": 4,
+                "review_indicators_detected": 0,
                 "validated_resource_findings": 0,
                 "projected_annual_recovery_usd": 0.0,
                 "severity_distribution": {"CRITICAL": "UNASSESSED", "HIGH": "UNASSESSED", "MEDIUM": "UNASSESSED", "LOW": "UNASSESSED"},
-                "scanner_manifest": {
-                    "EC2": {"status": "OBSERVATIONAL", "findings": 0},
-                    "EBS": {"status": "OBSERVATIONAL", "findings": 0},
-                    "SecretsManager": {"status": "OBSERVATIONAL", "findings": 0}
-                }
+                "scanner_manifest": {}
             },
             "evidence_state": {
                 "collection_status": "OBSERVATION COMPLETE",
@@ -156,18 +155,21 @@ def get_all_active_regions():
         response = ec2_client.describe_regions(AllRegions=False)
         return sorted([r["RegionName"] for r in response.get("Regions", [])])
     except Exception as e:
-        logger.warning(f"Region discovery fallback triggered: {e}")
-        return ["us-east-1", "us-west-2"]
+        logger.warning(f"Dynamic global region discovery failed, falling back to extended commercial scope: {e}")
+        return [
+            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+            "eu-west-1", "eu-central-1", "ap-southeast-1", "ap-northeast-1"
+        ]
 
 def deduplicate_findings(raw_findings):
     seen_fingerprints = set()
     unique_findings = []
     for finding in raw_findings:
-        region = finding.region
-        res_id = finding.resource_id
-        f_class = finding.id
-        port = finding.metadata.get('port', 'ALL') if hasattr(finding, 'metadata') else 'ALL'
-        protocol = finding.metadata.get('protocol', 'ALL') if hasattr(finding, 'metadata') else 'ALL'
+        region = getattr(finding, 'region', 'global')
+        res_id = getattr(finding, 'resource_id', 'unknown')
+        f_class = getattr(finding, 'id', 'finding')
+        port = finding.metadata.get('port', 'ALL') if hasattr(finding, 'metadata') and isinstance(finding.metadata, dict) else 'ALL'
+        protocol = finding.metadata.get('protocol', 'ALL') if hasattr(finding, 'metadata') and isinstance(finding.metadata, dict) else 'ALL'
         stable_signature = f"{region}:{res_id}:{f_class}:{port}:{protocol}"
         fingerprint = hashlib.sha256(stable_signature.encode()).hexdigest()
         if fingerprint not in seen_fingerprints:
@@ -181,33 +183,42 @@ def execute_full_audit(regions=None, arn=None):
         
     raw_findings = []
     executed_services = []
-    scanner_manifest = {
-        "EC2": {"status": "PENDING", "findings": 0},
-        "EBS": {"status": "PENDING", "findings": 0},
-        "SecretsManager": {"status": "PENDING", "findings": 0}
+    scanner_manifest = {}
+
+    service_modules = {
+        "EC2": ec2,
+        "EBS": ebs,
+        "RDS": rds,
+        "ECR": ecr,
+        "ECS": ecs,
+        "KMS": kms,
+        "SecretsManager": secrets,
+        "Lambda": lambda_scanner,
+        "WAF": waf,
+        "Config": config_scanner,
+        "CloudTrail": trail,
+        "SecurityGroups": security_groups
     }
 
-    try:
-        ec2_findings = ec2.scan(get_client, regions)
-        raw_findings.extend(ec2_findings)
-        scanner_manifest["EC2"]["status"] = "COMPLETED"
-        scanner_manifest["EC2"]["findings"] = len(ec2_findings)
-        scanner_manifest["EBS"]["status"] = "COMPLETED"
-        executed_services.extend(["EC2", "EBS"])
-    except Exception as e:
-        scanner_manifest["EC2"]["status"] = f"OBSERVATIONAL: {e}"
-
-    try:
-        secrets_findings = secrets.scan(get_client, regions)
-        raw_findings.extend(secrets_findings)
-        scanner_manifest["SecretsManager"]["status"] = "COMPLETED"
-        scanner_manifest["SecretsManager"]["findings"] = len(secrets_findings)
-        executed_services.append("SecretsManager")
-    except Exception as e:
-        scanner_manifest["SecretsManager"]["status"] = f"OBSERVATIONAL: {e}"
+    for svc_name, svc_module in service_modules.items():
+        scanner_manifest[svc_name] = {"status": "PENDING", "findings": 0}
+        try:
+            if svc_module and hasattr(svc_module, "scan"):
+                svc_findings = svc_module.scan(get_client, regions)
+                if svc_findings:
+                    raw_findings.extend(svc_findings)
+                    scanner_manifest[svc_name]["findings"] = len(svc_findings)
+                scanner_manifest[svc_name]["status"] = "COMPLETED"
+                if svc_name not in executed_services:
+                    executed_services.append(svc_name)
+            else:
+                scanner_manifest[svc_name]["status"] = "UNAVAILABLE"
+        except Exception as e:
+            scanner_manifest[svc_name]["status"] = f"OBSERVATIONAL ERROR: {e}"
+            logger.warning(f"Scanner module {svc_name} encountered exception: {e}")
 
     unique_findings = deduplicate_findings(raw_findings)
-    total_recovery = sum(f.annual_recovery for f in unique_findings)
+    total_recovery = sum(getattr(f, 'annual_recovery', 0.0) for f in unique_findings)
 
     sev_dist = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for f in unique_findings:
@@ -253,7 +264,7 @@ def execute_full_audit(regions=None, arn=None):
         },
         "scan_scope": {
             "regions_evaluated": regions,
-            "services_evaluated": executed_services if executed_services else ["EC2", "EBS", "SecretsManager"],
+            "services_evaluated": executed_services if executed_services else list(service_modules.keys()),
             "accounts_evaluated": [principal_account]
         },
         "summary": {
@@ -275,7 +286,7 @@ def execute_full_audit(regions=None, arn=None):
             },
             "finding_objects_present": bool(unique_findings)
         },
-        "findings": [f.to_dict() for f in unique_findings]
+        "findings": [f.to_dict() if hasattr(f, 'to_dict') else dict(f) for f in unique_findings]
     }
 
     return envelope
