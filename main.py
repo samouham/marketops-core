@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from engine import get_client
@@ -14,26 +14,38 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.13"
+    version="v211.14"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
-origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
-
+# PERMISSIVE CORS SETUP WITH GLOBAL HEADERS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.options("/{full_path:path}")
-def options_preflight(full_path: str):
-    return {"status": "ok"}
+@app.middleware("http")
+async def add_cors_headers_to_all_responses(request: Request, call_next):
+    """Guarantees CORS headers are injected on EVERY response, including 400/500 errors."""
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 @app.get("/health")
 def health_check():
@@ -41,7 +53,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.13", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.14", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -59,10 +71,10 @@ class RegistrationRequest(BaseModel):
 def register_aws_customer(payload: RegistrationRequest):
     try:
         arn_pattern = r"^arn:aws:iam::\d{12}:role\/[\w+=,.@\-_/]+$"
-        if not payload.arn or not re.match(arn_pattern, payload.arn):
+        if payload.arn and not re.match(arn_pattern, payload.arn):
             raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format or structure.")
         logger.info("Customer registration verified successfully.")
-        return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn}
+        return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn or "PENDING"}
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -71,16 +83,16 @@ def register_aws_customer(payload: RegistrationRequest):
 
 @app.post("/api/execute-scan")
 def api_execute_scan(payload: Optional[AuditRequest] = Body(default=None)):
-    if payload is None:
-        payload = AuditRequest()
     try:
+        if payload is None:
+            payload = AuditRequest()
         regions = payload.regions if payload.regions else get_all_active_regions()
         return execute_full_audit(regions, payload.arn)
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.exception("Audit scan execution failed.")
-        raise HTTPException(status_code=500, detail="Audit execution failed.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def get_all_active_regions():
     try:
