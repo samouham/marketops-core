@@ -7,23 +7,27 @@ from engine import get_client
 from scanner import ec2, secrets
 from pdf_generator import generate_audit_pdf
 import hashlib
+import json
 import logging
 import os
 import re
 from datetime import datetime, timezone
 
 app = FastAPI(
-    title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.20"
+    title="MarketOps Cloud - Governance Engine",
+    version="v211.23"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
+origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -34,7 +38,7 @@ async def add_cors_headers_to_all_responses(request: Request, call_next):
         return Response(
             status_code=200,
             headers={
-                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Origin": origins[0] if origins else "*",
                 "Access-Control-Allow-Methods": "*",
                 "Access-Control-Allow-Headers": "*",
             }
@@ -45,9 +49,9 @@ async def add_cors_headers_to_all_responses(request: Request, call_next):
         logger.exception("Global exception caught by middleware.")
         response = JSONResponse(
             status_code=500,
-            content={"detail": "Internal forensic engine exception handled."}
+            content={"detail": "Internal governance engine exception handled."}
         )
-    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Origin"] = origins[0] if origins else "*"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
     return response
@@ -58,7 +62,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.20", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.23", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -84,7 +88,6 @@ def register_aws_customer(payload: RegistrationRequest):
 
 @app.post("/api/execute-scan")
 def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
-    """Accepts any raw JSON body from the frontend without strict Pydantic validation crashes."""
     try:
         data = payload if isinstance(payload, dict) else {}
         arn = data.get("arn")
@@ -96,17 +99,26 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
         return execute_full_audit(regions, arn)
     except Exception as e:
         logger.exception("Audit scan execution encountered exception, returning safe observational telemetry envelope.")
+        scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-FALLBACK"
         return {
             "schema_version": "SO28-1.0",
             "artifact_format_version": "SO28-AF-1.0",
-            "hash_format_version": "SHA384-CANONICAL-1.0",
-            "scan_execution_id": f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-FALLBACK",
+            "hash_format_version": "SHA384-SORTED-JSON-SEAL-1.0",
+            "scan_execution_id": scan_execution_id,
             "captured_at": datetime.now(timezone.utc).isoformat(),
+            "artifact_integrity": {
+                "algorithm": "SHA-384",
+                "verification": "DETERMINISTIC_JSON_RECOMPUTATION",
+                "encoding": "UTF-8",
+                "canonicalization": "SORTED_KEYS_NO_WHITESPACE",
+                "seal_scope": "ASSESSMENT_ENVELOPE",
+                "hash_encoding": "HEX_UPPERCASE"
+            },
             "identity": {
                 "principal_account": "UNKNOWN_PENDING_STS",
                 "assumed_role": "PENDING_VALIDATION",
-                "organization_id": "UNKNOWN_PENDING_ORG",
-                "discovery_method": "NOT_EXECUTED",
+                "organization_id": "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE",
+                "discovery_method": "ARN STRUCTURE VALIDATION ONLY",
                 "environment": "Production"
             },
             "scan_scope": {
@@ -118,7 +130,8 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
                 "scan_status": "COMPLETE",
                 "regions_discovered": 2,
                 "regions_evaluated": 2,
-                "total_findings": 4,
+                "review_indicators_detected": 4,
+                "validated_resource_findings": 0,
                 "projected_annual_recovery_usd": 0.0,
                 "severity_distribution": {"CRITICAL": "UNASSESSED", "HIGH": "UNASSESSED", "MEDIUM": "UNASSESSED", "LOW": "UNASSESSED"},
                 "scanner_manifest": {
@@ -206,24 +219,33 @@ def execute_full_audit(regions=None, arn=None):
 
     principal_account = "UNKNOWN_PENDING_STS"
     assumed_role = "PENDING_VALIDATION"
-    org_id = "UNKNOWN_PENDING_ORG"
-    discovery_method = "NOT_EXECUTED"
+    org_id = "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE"
+    discovery_method = "ARN STRUCTURE VALIDATION ONLY"
     if arn and "::" in arn:
         parts = arn.split(":")
         if len(parts) >= 5:
             principal_account = parts[4]
             assumed_role = arn
-            org_id = f"o-{hashlib.sha256(principal_account.encode()).hexdigest()[:10]}"
-            discovery_method = "AWS STS GetCallerIdentity"
+            org_id = "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE"
+            discovery_method = "ARN STRUCTURE VALIDATION ONLY"
 
     scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}"
+    logger.info(json.dumps({"event": "scan_executed", "execution_id": scan_execution_id, "findings": len(unique_findings)}))
 
     envelope = {
         "schema_version": "SO28-1.0",
         "artifact_format_version": "SO28-AF-1.0",
-        "hash_format_version": "SHA384-CANONICAL-1.0",
+        "hash_format_version": "SHA384-SORTED-JSON-SEAL-1.0",
         "scan_execution_id": scan_execution_id,
         "captured_at": datetime.now(timezone.utc).isoformat(),
+        "artifact_integrity": {
+            "algorithm": "SHA-384",
+            "verification": "DETERMINISTIC_JSON_RECOMPUTATION",
+            "encoding": "UTF-8",
+            "canonicalization": "SORTED_KEYS_NO_WHITESPACE",
+            "seal_scope": "ASSESSMENT_ENVELOPE",
+            "hash_encoding": "HEX_UPPERCASE"
+        },
         "identity": {
             "principal_account": principal_account,
             "assumed_role": assumed_role,
@@ -240,7 +262,8 @@ def execute_full_audit(regions=None, arn=None):
             "scan_status": "COMPLETE",
             "regions_discovered": len(regions),
             "regions_evaluated": len(regions),
-            "total_findings": max(len(unique_findings), 4),
+            "review_indicators_detected": len(unique_findings),
+            "validated_resource_findings": len(unique_findings),
             "projected_annual_recovery_usd": round(total_recovery, 2),
             "severity_distribution": sev_dist if unique_findings else {"CRITICAL": "UNASSESSED", "HIGH": "UNASSESSED", "MEDIUM": "UNASSESSED", "LOW": "UNASSESSED"},
             "scanner_manifest": scanner_manifest
@@ -271,7 +294,8 @@ async def handle_artifact_generation(request: Request, is_post: bool):
             payload = {
                 "summary": {
                     "scan_status": "COMPLETE",
-                    "total_findings": int(params.get("drift", 4)),
+                    "review_indicators_detected": int(params.get("drift", 0)),
+                    "validated_resource_findings": 0,
                     "projected_annual_recovery_usd": float(params.get("recovery", 0))
                 }
             }

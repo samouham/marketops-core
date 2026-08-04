@@ -10,9 +10,18 @@ def normalize_payload(payload: dict) -> dict:
 
     payload.setdefault("schema_version", "SO28-1.0")
     payload.setdefault("artifact_format_version", "SO28-AF-1.0")
-    payload.setdefault("hash_format_version", "SHA384-CANONICAL-1.0")
+    payload.setdefault("hash_format_version", "SHA384-SORTED-JSON-SEAL-1.0")
     payload.setdefault("scan_execution_id", payload.get("execution_id") or f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}")
     payload.setdefault("captured_at", payload.get("captured_at") or datetime.now(timezone.utc).isoformat())
+
+    payload.setdefault("artifact_integrity", {
+        "algorithm": "SHA-384",
+        "verification": "DETERMINISTIC_JSON_RECOMPUTATION",
+        "encoding": "UTF-8",
+        "canonicalization": "SORTED_KEYS_NO_WHITESPACE",
+        "seal_scope": "ASSESSMENT_ENVELOPE",
+        "hash_encoding": "HEX_UPPERCASE"
+    })
 
     identity = payload.get("identity")
     if not isinstance(identity, dict):
@@ -21,12 +30,12 @@ def normalize_payload(payload: dict) -> dict:
     raw_account = payload.get("account_id") or payload.get("aws_account_id") or payload.get("principal_account") or identity.get("principal_account")
     if not raw_account or raw_account == "123456789012" or raw_account == "UNKNOWN_PENDING_STS":
         principal_account = "UNKNOWN_PENDING_STS"
-        org_id = "UNKNOWN_PENDING_ORG"
+        org_id = "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE"
         assumed_role = "PENDING_VALIDATION"
-        discovery_method = "NOT_EXECUTED"
+        discovery_method = "ARN STRUCTURE VALIDATION ONLY"
     else:
         principal_account = str(raw_account)
-        org_id = payload.get("organization_id") or identity.get("organization_id") or "UNKNOWN_PENDING_ORG"
+        org_id = payload.get("organization_id") or identity.get("organization_id") or "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE"
         assumed_role = payload.get("assumed_role") or identity.get("assumed_role") or f"arn:aws:iam::{principal_account}:role/Sovereign28AuditRole"
         discovery_method = "AWS STS GetCallerIdentity"
 
@@ -91,7 +100,7 @@ def add_header_footer(canvas, doc):
     # Top Running Header
     canvas.setFont('Helvetica-Bold', 7)
     canvas.setFillColor(colors.HexColor('#0f172a'))
-    canvas.drawString(36, height - 25, "SOVEREIGN-28 | FORENSIC CONTROL PLANE")
+    canvas.drawString(36, height - 25, "SOVEREIGN-28 | GOVERNANCE VERIFICATION CONTROL PLANE")
     canvas.setStrokeColor(colors.HexColor('#cbd5e1'))
     canvas.setLineWidth(0.5)
     canvas.line(36, height - 31, width - 36, height - 31)
@@ -100,8 +109,8 @@ def add_header_footer(canvas, doc):
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(colors.HexColor('#64748b'))
     canvas.drawString(36, 20, "SHA-384 INTEGRITY-SEALED RECORD")
-    canvas.drawCentredString(width / 2.0, 20, "AWS WELL-ARCHITECTED ALIGNMENT | FTR PREPARATION")
-    canvas.drawRightString(width - 36, 20, f"Page {doc.page} | FORENSIC NODE")
+    canvas.drawCentredString(width / 2.0, 20, "AWS WELL-ARCHITECTED REFERENCE ALIGNMENT | FTR PREPARATION")
+    canvas.drawRightString(width - 36, 20, f"Page {doc.page} | GOVERNANCE NODE")
     canvas.line(36, 30, width - 36, 30)
     
     canvas.restoreState()
@@ -116,8 +125,8 @@ def generate_audit_pdf(payload: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=65, bottomMargin=70)
 
-    doc.title = "Sovereign-28 Apex Omni Artifact v211.18"
-    doc.author = "MarketOps Cloud - Forensic Engine"
+    doc.title = "Sovereign-28 Apex Omni Artifact v211.23"
+    doc.author = "MarketOps Cloud - Governance Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
     story = []
@@ -127,12 +136,13 @@ def generate_audit_pdf(payload: dict) -> bytes:
     identity = payload.get("identity", {})
     scan_scope = payload.get("scan_scope", {})
     evidence_state = payload.get("evidence_state", {})
+    artifact_integrity = payload.get("artifact_integrity", {})
     findings = payload.get("findings", [])
     
     principal = identity.get("principal_account") or "UNKNOWN_PENDING_STS"
     assumed_role = identity.get("assumed_role") or "PENDING_VALIDATION"
-    discovery_method = identity.get("discovery_method") or "NOT_EXECUTED"
-    org_id = identity.get("organization_id") or "UNKNOWN_PENDING_ORG"
+    discovery_method = identity.get("discovery_method") or "ARN STRUCTURE VALIDATION ONLY"
+    org_id = identity.get("organization_id") or "UNAVAILABLE_FROM_CURRENT_PERMISSION_SCOPE"
     environment = identity.get("environment") or "Production / Unclassified"
     
     total_findings = int(summary.get("total_findings", 0))
@@ -166,10 +176,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", datetime.now(timezone.utc).isoformat())
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.18")
+    engine_version = payload.get("engine_version", "Sovereign-28 Governance Engine v211.23")
     schema_version = payload.get("schema_version", "SO28-1.0")
     artifact_format_version = payload.get("artifact_format_version", "SO28-AF-1.0")
-    hash_format_version = payload.get("hash_format_version", "SHA384-CANONICAL-1.0")
+    hash_format_version = payload.get("hash_format_version", "SHA384-SORTED-JSON-SEAL-1.0")
     
     scan_execution_id = payload.get("scan_execution_id", f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}")
     
@@ -183,7 +193,8 @@ def generate_audit_pdf(payload: dict) -> bytes:
             "engine_version": engine_version,
             "schema_version": schema_version,
             "artifact_format_version": artifact_format_version,
-            "hash_format_version": hash_format_version
+            "hash_format_version": hash_format_version,
+            "artifact_integrity": artifact_integrity
         }
         canonical_json = json.dumps(evidence_envelope, sort_keys=True, default=str, separators=(",", ":"))
         seal_hash = hashlib.sha384(canonical_json.encode("utf-8")).hexdigest().upper()
@@ -197,14 +208,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     artifact_id = f"SO28-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{seal_hash[:8]}"
 
     evidence_objects_count = len(findings)
-    if evidence_objects_count == effective_findings_count and evidence_objects_count > 0:
+    if evidence_objects_count > 0:
         evidence_str = str(evidence_objects_count)
-    elif evidence_objects_count > 0:
-        evidence_str = str(evidence_objects_count)
-    elif effective_findings_count > 0:
-        evidence_str = "PENDING RESOURCE VALIDATION"
     else:
-        evidence_str = "0"
+        evidence_str = "PENDING RESOURCE VALIDATION"
 
     title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor('#0f172a'), spaceAfter=4)
     section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10.5, textColor=colors.HexColor('#0284c7'), spaceAfter=4, spaceBefore=8)
@@ -222,7 +229,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     exec_summary_text = (
         "<b>ASSESSMENT OBJECTIVE:</b> Provide leadership with a non-destructive, read-only telemetry observation "
-        "across evaluated AWS scopes, aligning with AWS Well-Architected review principles and Foundational Technical Review (FTR) preparation.<br/><br/>"
+        "across evaluated AWS scopes, aligning with AWS Well-Architected Framework concepts and Foundational Technical Review (FTR) preparation.<br/><br/>"
         "<b>EXECUTIVE OUTCOME:</b><br/>"
         f"• <b>Evaluation Scope:</b> {len(regions_list)} AWS Regions evaluated ({regions_str}) across {len(services_list)} service domains.<br/>"
         f"• <b>Governance Posture:</b> {risk_rating} (Confidence Level: {evidence_confidence}).<br/>"
@@ -263,10 +270,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(PageBreak())
 
     # ==========================================
-    # PAGE 2: TECHNICAL FORENSIC CONTROL PLANE
+    # PAGE 2: TECHNICAL CONTROL PLANE
     # ==========================================
     story.append(Paragraph("SOVEREIGN-28 APEX OMNI ARTIFACT", title_style))
-    story.append(Paragraph("Institutional Forensic Control Plane & Governance Verification", ParagraphStyle('SubTitle2', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
+    story.append(Paragraph("Institutional Governance Control Plane & Verification", ParagraphStyle('SubTitle2', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
     story.append(Spacer(1, 6))
 
     custody_data = [
@@ -281,7 +288,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         [Paragraph("<b>DISCOVERY METHOD</b>", body_style), Paragraph(str(discovery_method), body_style)],
         [Paragraph("<b>ENGINE VERSION</b>", body_style), Paragraph(engine_version, body_style)],
         [Paragraph("<b>SHA-384 INTEGRITY ENVELOPE HASH</b>", body_style), Paragraph(f"<font name='Courier' size=5.5>{formatted_hash}</font>", body_style)],
-        [Paragraph("<b>VERIFICATION METHOD</b>", body_style), Paragraph("Recompute SHA-384 against canonical evidence JSON envelope.", body_style)],
+        [Paragraph("<b>VERIFICATION METHOD</b>", body_style), Paragraph("Recompute SHA-384 against deterministic JSON envelope.", body_style)],
         [Paragraph("<b>EVIDENCE CAPTURED</b>", body_style), Paragraph(str(evidence_timestamp), body_style)],
         [Paragraph("<b>ARTIFACT GENERATED</b>", body_style), Paragraph(f"{artifact_timestamp} | INTEGRITY SEALED", body_style)]
     ]
@@ -299,16 +306,15 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     scan_duration = summary.get("duration_seconds", "461")
     api_calls = summary.get("api_calls", "1,842")
-    sev_dist = summary.get("severity_distribution", {})
-    sev_str = f"Crit: {sev_dist.get('CRITICAL','-')} | High: {sev_dist.get('HIGH','-')} | Med: {sev_dist.get('MEDIUM','-')} | Low: {sev_dist.get('LOW','-')}"
     
     metrics_data = [
         ["Evaluation Metric", "Institutional Result"],
         ["Overall Governance Posture", risk_rating],
         ["Environment Classification", environment],
         ["Accounts Evaluated", str(account_count)],
-        ["Governance Review Indicators", str(effective_findings_count)],
-        ["Severity Classification", sev_str],
+        ["Review Indicators Detected", str(summary.get("review_indicators_detected", effective_findings_count))],
+        ["Validated Resource Findings", str(summary.get("validated_resource_findings", 0))],
+        ["Risk Classification", "PENDING RESOURCE EVIDENCE VALIDATION"],
         ["Region Coverage Validation", f"{coverage_status} ({regions_str})"],
         ["Services Evaluated", services_str],
         ["Telemetry Collection Status", evidence_state.get("collection_status", "OBSERVATION COMPLETE")],
@@ -333,12 +339,12 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(t_metrics)
     story.append(Spacer(1, 6))
 
-    story.append(Paragraph("0.0 EXECUTIVE FORENSIC NARRATIVE", section_style))
+    story.append(Paragraph("0.0 EXECUTIVE GOVERNANCE NARRATIVE", section_style))
     if evidence_confidence == "TELEMETRY ONLY":
         narrative_text = (
             f"The Sovereign-28 telemetry layer recorded <b>{effective_findings_count} governance review indicators</b> "
-            f"via {scope_phrase} through a read-only observational metadata handshake. Resource-level evidence objects were "
-            "deferred during artifact generation and require validation before remediation."
+            f"via {scope_phrase} through a read-only observational metadata handshake. Detailed resource observation objects "
+            "were not included in this assessment envelope. Resource-level validation is required."
         )
     else:
         narrative_text = (
@@ -351,7 +357,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(Paragraph("0.1 DATA CUSTODY & METHODOLOGY", section_style))
     method_data = [
         ["Methodology", "Observational Metadata Handshake (Zero Write-Access)"],
-        ["Industry Benchmark", "AWS Well-Architected Review principles and Foundational Technical Review preparation alignment."],
+        ["Industry Benchmark", "AWS Well-Architected Framework concepts and Foundational Technical Review preparation alignment."],
         ["Artifact Lifecycle", "Customer Controlled | SHA-384 Integrity Sealed | Timestamp Bound"]
     ]
     t_method = Table(method_data, colWidths=[130, 410])
@@ -367,14 +373,14 @@ def generate_audit_pdf(payload: dict) -> bytes:
     story.append(PageBreak())
 
     # ==========================================
-    # PAGE 3: FIELD GLOSSARY & WA ALIGNMENT
+    # PAGE 3: FIELD GLOSSARY & REFERENCE ALIGNMENT
     # ==========================================
-    story.append(Paragraph("1.0 INSTITUTIONAL FIELD GLOSSARY & AWS WELL-ARCHITECTED ALIGNMENT (F1-F28)", title_style))
-    story.append(Paragraph("Alignment reference covering AWS Well-Architected Pillars and Best Practice Control Objectives.", body_style))
+    story.append(Paragraph("1.0 INSTITUTIONAL FIELD GLOSSARY & AWS WELL-ARCHITECTED REFERENCE ALIGNMENT (F1-F28)", title_style))
+    story.append(Paragraph("Alignment reference covering AWS Well-Architected Framework concepts and Best Practice Control Objectives.", body_style))
     story.append(Spacer(1, 4))
     
     glossary_data = [
-        ["Field", "Control Domain", "AWS Well-Architected Alignment & Best Practice"],
+        ["Field", "Control Domain", "AWS Well-Architected Reference Alignment & Best Practice"],
         ["F1-F4", "COMPUTE CORE", "Cost Optimization: EC2 orphaned instances & Lambda hygiene (COST03-BP02)."],
         ["F5-F8", "STORAGE VAULT", "Cost Optimization: EBS unattached storage leakage (COST03-BP01)."],
         ["F9-F12", "DATABASE LAYER", "Reliability / Security: RDS lifecycle & S3 Public Exposure risk (SEC03-BP01)."],
@@ -400,7 +406,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     # ==========================================
     # PAGE 4: EXECUTIVE INTERPRETATION & RECOMMENDATIONS
     # ==========================================
-    story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION & ADVISORY ACTIONS", title_style))
+    story.append(Paragraph("2.0 EXECUTIVE GOVERNANCE INTERPRETATION & ADVISORY ACTIONS", title_style))
     story.append(Spacer(1, 4))
     
     if recovery > 0:
@@ -447,7 +453,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     if findings:
         story.append(Paragraph("3.0 VERIFIED DRIFT VECTORS & REMEDIATION MATRIX", title_style))
     else:
-        story.append(Paragraph("3.0 FORENSIC REVIEW INDICATORS & EVIDENCE AVAILABILITY", title_style))
+        story.append(Paragraph("3.0 GOVERNANCE REVIEW INDICATORS & EVIDENCE AVAILABILITY", title_style))
     story.append(Spacer(1, 4))
 
     if findings:
@@ -518,7 +524,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
             ('BOTTOMPADDING', (0,0), (-1,-1), 3.5),
             ('LEFTPADDING', (0,0), (-1,-1), 5),
         ]))
-        story.append(Paragraph(f"<b>FORENSIC REVIEW INDICATORS: {effective_findings_count} FLAGS FLAGGED FOR VALIDATION</b><br/>Detailed evidence objects were deferred in the captured envelope. Resource-level validation required.", body_style))
+        story.append(Paragraph(f"<b>GOVERNANCE REVIEW INDICATORS: {effective_findings_count} ITEMS FLAGGED FOR VALIDATION</b><br/>Detailed resource observation objects were not included in this assessment envelope. Resource-level validation is required.", body_style))
         story.append(Spacer(1, 6))
         story.append(t_reg)
     else:
@@ -552,6 +558,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         "artifact_format_version": artifact_format_version,
         "hash_format_version": hash_format_version,
         "hash_algorithm": "SHA-384",
+        "artifact_integrity": artifact_integrity,
         "principal_account": principal,
         "assumed_role": assumed_role,
         "organization_id": org_id,
@@ -577,7 +584,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     conclusion_text = (
         "<b>EXECUTIVE CONCLUSION & CONTROL BOUNDARY STATEMENT:</b><br/>"
         "Sovereign-28 completed a non-destructive governance observation cycle. "
-        "The assessment produced cryptographically sealed telemetry evidence across the evaluated AWS scope. "
+        "The assessment produced a SHA-384 integrity-sealed telemetry assessment record capturing observations across the evaluated AWS scope. "
         "Sovereign-28 operates exclusively through customer-authorized read-only AWS APIs. "
         "No infrastructure mutation, configuration changes, credential storage, or workload interruption occurred during evaluation."
     )
