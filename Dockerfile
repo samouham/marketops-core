@@ -5,6 +5,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONHASHSEED=0
 RUN adduser --disabled-password appuser && chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8000

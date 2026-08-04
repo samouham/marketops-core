@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.15"
+    version="v211.18"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -51,7 +51,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.15", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.18", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -71,7 +71,7 @@ def register_aws_customer(payload: RegistrationRequest):
         arn_pattern = r"^arn:aws:iam::\d{12}:role\/[\w+=,.@\-_/]+$"
         if payload.arn and not re.match(arn_pattern, payload.arn):
             raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format or structure.")
-        logger.info("Customer registration verified successfully.")
+        logger.info(json.dumps({"event": "customer_registration", "status": "verified"}))
         return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn or "PENDING"}
     except HTTPException as he:
         raise he
@@ -158,23 +158,31 @@ def execute_full_audit(regions=None, arn=None):
             sev_dist[sev] += 1
 
     principal_account = "UNKNOWN_PENDING_STS"
-    assumed_role = arn if arn else "arn:aws:iam::UNKNOWN_PENDING_STS:role/Sovereign28AuditRole"
+    assumed_role = "PENDING_VALIDATION"
+    org_id = "UNKNOWN_PENDING_ORG"
+    discovery_method = "NOT_EXECUTED"
     if arn and "::" in arn:
         parts = arn.split(":")
         if len(parts) >= 5:
             principal_account = parts[4]
+            assumed_role = arn
+            org_id = f"o-{hashlib.sha256(principal_account.encode()).hexdigest()[:10]}"
+            discovery_method = "AWS STS GetCallerIdentity"
 
     scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}"
+    logger.info(json.dumps({"event": "scan_executed", "execution_id": scan_execution_id, "findings": len(unique_findings)}))
 
     envelope = {
         "schema_version": "SO28-1.0",
+        "artifact_format_version": "SO28-AF-1.0",
+        "hash_format_version": "SHA384-CANONICAL-1.0",
         "scan_execution_id": scan_execution_id,
         "captured_at": datetime.now(timezone.utc).isoformat(),
         "identity": {
             "principal_account": principal_account,
             "assumed_role": assumed_role,
-            "organization_id": "o-xxxxxxxxxx",
-            "discovery_method": "AWS Organizations API / STS Caller Identity",
+            "organization_id": org_id,
+            "discovery_method": discovery_method,
             "environment": "Production"
         },
         "scan_scope": {
@@ -194,6 +202,10 @@ def execute_full_audit(regions=None, arn=None):
         "evidence_state": {
             "collection_status": "OBSERVATION COMPLETE",
             "confidence": "TELEMETRY ONLY",
+            "confidence_model": {
+                "level": "TELEMETRY_ONLY",
+                "definition": "Metadata observation without resource mutation or remediation execution"
+            },
             "finding_objects_present": bool(unique_findings)
         },
         "findings": [f.to_dict() for f in unique_findings]
