@@ -14,13 +14,12 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.14"
+    version="v211.15"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
-# PERMISSIVE CORS SETUP WITH GLOBAL HEADERS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,7 +30,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def add_cors_headers_to_all_responses(request: Request, call_next):
-    """Guarantees CORS headers are injected on EVERY response, including 400/500 errors."""
     if request.method == "OPTIONS":
         return Response(
             status_code=200,
@@ -53,7 +51,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.14", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.15", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():

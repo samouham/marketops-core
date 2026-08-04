@@ -97,7 +97,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=65, bottomMargin=70)
 
-    doc.title = "Sovereign-28 Apex Omni Artifact v211.13"
+    doc.title = "Sovereign-28 Apex Omni Artifact v211.15"
     doc.author = "MarketOps Cloud - Forensic Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
@@ -147,7 +147,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", datetime.now(timezone.utc).isoformat())
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.13")
+    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.15")
     schema_version = payload.get("schema_version", "SO28-1.0")
     
     scan_execution_id = payload.get("scan_execution_id", f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}")
@@ -496,14 +496,12 @@ def generate_audit_pdf(payload: dict) -> bytes:
         "regions_evaluated": regions_list
     }
     
-    # Safe multi-line paragraph pagination to eliminate JSON container clipping
     manifest_json = json.dumps(manifest_summary, indent=2, default=str)
     for line in manifest_json.splitlines():
         story.append(Paragraph(escape(line).replace(" ", "&nbsp;"), cli_style))
     
     story.append(Spacer(1, 10))
 
-    # Professional Executive Conclusion Block
     conclusion_text = (
         "<b>EXECUTIVE CONCLUSION:</b><br/>"
         "Sovereign-28 completed a non-destructive governance observation cycle. "
