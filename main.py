@@ -13,33 +13,24 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.10"
+    version="v211.11"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
-origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
-
+# PERMISSIVE CORS FIX: Allow all origins during beta/production frontend pairing
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.options("/api/execute-scan")
-def options_execute_scan():
-    return {"status": "ok"}
-
-@app.options("/api/register-aws-customer")
-def options_register_customer():
-    return {"status": "ok"}
-
-@app.options("/api/generate-artifact")
-def options_generate_artifact():
+@app.options("/{full_path:path}")
+def options_preflight(full_path: str):
+    """Global OPTIONS preflight handler to prevent CORS blockages on any route."""
     return {"status": "ok"}
 
 @app.get("/health")
@@ -65,6 +56,8 @@ def register_aws_customer(payload: RegistrationRequest):
             raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format.")
         logger.info("Customer registration verified successfully.")
         return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.exception("Customer registration fault encountered.")
         raise HTTPException(status_code=500, detail="Customer registration failed.")
@@ -74,9 +67,11 @@ def api_execute_scan(payload: AuditRequest = AuditRequest()):
     try:
         regions = payload.regions if payload.regions else get_all_active_regions()
         return execute_full_audit(regions, payload.arn)
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.exception("Audit scan execution failed.")
-        raise HTTPException(status_code=500, detail="Audit execution failed.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 def get_all_active_regions():
     try:
