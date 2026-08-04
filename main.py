@@ -15,19 +15,17 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Governance Engine",
-    version="v211.23"
+    version="v211.24"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
-origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
-
+# PERMISSIVE CORS SETUP: Allow all origins to eliminate domain mismatch errors during frontend pairing
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -38,7 +36,7 @@ async def add_cors_headers_to_all_responses(request: Request, call_next):
         return Response(
             status_code=200,
             headers={
-                "Access-Control-Allow-Origin": origins[0] if origins else "*",
+                "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "*",
                 "Access-Control-Allow-Headers": "*",
             }
@@ -51,7 +49,7 @@ async def add_cors_headers_to_all_responses(request: Request, call_next):
             status_code=500,
             content={"detail": "Internal governance engine exception handled."}
         )
-    response.headers["Access-Control-Allow-Origin"] = origins[0] if origins else "*"
+    response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
     return response
@@ -62,7 +60,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.23", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.24", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
