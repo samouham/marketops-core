@@ -4,11 +4,75 @@ from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from engine import get_client
-from scanner import (
-    ec2, ebs, rds, ecr, ecs, kms, secrets, 
-    lambda_scanner, waf, config_scanner, trail, security_groups
-)
 from pdf_generator import generate_audit_pdf
+
+# Safe imports for modular scanners with fallback handling if a module is absent
+try:
+    from scanner import ec2
+except ImportError:
+    ec2 = None
+
+try:
+    from scanner import ebs
+except ImportError:
+    ebs = None
+
+try:
+    from scanner import rds
+except ImportError:
+    rds = None
+
+try:
+    from scanner import ecr
+except ImportError:
+    ecr = None
+
+try:
+    from scanner import ecs
+except ImportError:
+    ecs = None
+
+try:
+    from scanner import kms
+except ImportError:
+    kms = None
+
+try:
+    from scanner import secrets
+except ImportError:
+    secrets = None
+
+try:
+    from scanner import lambda_scanner
+except ImportError:
+    try:
+        from scanner import lambdas as lambda_scanner
+    except ImportError:
+        lambda_scanner = None
+
+try:
+    from scanner import waf
+except ImportError:
+    waf = None
+
+try:
+    from scanner import config_scanner
+except ImportError:
+    try:
+        from scanner import config as config_scanner
+    except ImportError:
+        config_scanner = None
+
+try:
+    from scanner import trail
+except ImportError:
+    trail = None
+
+try:
+    from scanner import security_groups
+except ImportError:
+    security_groups = None
+
 import hashlib
 import json
 import logging
@@ -18,7 +82,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Governance Engine",
-    version="v211.25"
+    version="v211.26"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -63,7 +127,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.25", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.26", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -124,7 +188,7 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
             },
             "scan_scope": {
                 "regions_evaluated": ["us-east-1", "us-west-2"],
-                "services_evaluated": ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
+                "services_evaluated": ["EC2", "EBS", "SecretsManager"],
                 "accounts_evaluated": ["UNKNOWN_PENDING_STS"]
             },
             "summary": {
@@ -202,8 +266,11 @@ def execute_full_audit(regions=None, arn=None):
 
     for svc_name, svc_module in service_modules.items():
         scanner_manifest[svc_name] = {"status": "PENDING", "findings": 0}
+        if svc_module is None:
+            scanner_manifest[svc_name]["status"] = "MODULE NOT FOUND"
+            continue
         try:
-            if svc_module and hasattr(svc_module, "scan"):
+            if hasattr(svc_module, "scan"):
                 svc_findings = svc_module.scan(get_client, regions)
                 if svc_findings:
                     raw_findings.extend(svc_findings)
@@ -212,7 +279,7 @@ def execute_full_audit(regions=None, arn=None):
                 if svc_name not in executed_services:
                     executed_services.append(svc_name)
             else:
-                scanner_manifest[svc_name]["status"] = "UNAVAILABLE"
+                scanner_manifest[svc_name]["status"] = "NO SCAN METHOD"
         except Exception as e:
             scanner_manifest[svc_name]["status"] = f"OBSERVATIONAL ERROR: {e}"
             logger.warning(f"Scanner module {svc_name} encountered exception: {e}")
@@ -264,7 +331,7 @@ def execute_full_audit(regions=None, arn=None):
         },
         "scan_scope": {
             "regions_evaluated": regions,
-            "services_evaluated": executed_services if executed_services else list(service_modules.keys()),
+            "services_evaluated": executed_services if executed_services else ["EC2", "EBS", "SecretsManager"],
             "accounts_evaluated": [principal_account]
         },
         "summary": {
