@@ -9,7 +9,7 @@ def normalize_payload(payload: dict) -> dict:
         payload = {}
 
     payload.setdefault("schema_version", "SO28-1.0")
-    payload.setdefault("scan_execution_id", payload.get("execution_id") or f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d')}-A91F83C2")
+    payload.setdefault("scan_execution_id", payload.get("execution_id") or f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}")
     payload.setdefault("captured_at", payload.get("captured_at") or datetime.now(timezone.utc).isoformat())
 
     identity = payload.get("identity")
@@ -52,8 +52,8 @@ def normalize_payload(payload: dict) -> dict:
     evidence_state = payload.get("evidence_state")
     if not isinstance(evidence_state, dict):
         evidence_state = {}
-    evidence_state.setdefault("confidence", "FULL" if raw_findings else "TELEMETRY ONLY")
-    evidence_state.setdefault("collection_status", "COMPLETE")
+    evidence_state.setdefault("confidence", "TELEMETRY ONLY")
+    evidence_state.setdefault("collection_status", "OBSERVATION COMPLETE")
     evidence_state.setdefault("finding_objects_present", bool(raw_findings))
     payload["evidence_state"] = evidence_state
 
@@ -72,7 +72,7 @@ def add_header_footer(canvas, doc):
     # Top Running Header
     canvas.setFont('Helvetica-Bold', 7)
     canvas.setFillColor(colors.HexColor('#0f172a'))
-    canvas.drawString(36, height - 25, "SOVEREIGN-28 APEX OMNI ARTIFACT | INSTITUTIONAL FORENSIC CONTROL PLANE")
+    canvas.drawString(36, height - 25, "SOVEREIGN-28 | FORENSIC CONTROL PLANE")
     canvas.setStrokeColor(colors.HexColor('#cbd5e1'))
     canvas.setLineWidth(0.5)
     canvas.line(36, height - 31, width - 36, height - 31)
@@ -80,8 +80,8 @@ def add_header_footer(canvas, doc):
     # Bottom 3-Part Non-Overlapping Footer
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(colors.HexColor('#64748b'))
-    canvas.drawString(36, 20, "CHAIN OF CUSTODY SHA-384 CRYPTOGRAPHICALLY SEALED")
-    canvas.drawCentredString(width / 2.0, 20, "AWS WELL-ARCHITECTED REVIEW PRINCIPLES | FTR PREPARATION")
+    canvas.drawString(36, 20, "SHA-384 SEALED EVIDENCE")
+    canvas.drawCentredString(width / 2.0, 20, "AWS WELL-ARCHITECTED REVIEW | FTR PREPARATION")
     canvas.drawRightString(width - 36, 20, f"Page {doc.page} | FORENSIC NODE")
     canvas.line(36, 30, width - 36, 30)
     
@@ -89,7 +89,7 @@ def add_header_footer(canvas, doc):
 
 def generate_audit_pdf(payload: dict) -> bytes:
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Preformatted
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
 
@@ -97,7 +97,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=65, bottomMargin=70)
 
-    doc.title = "Sovereign-28 Apex Omni Artifact v211.10"
+    doc.title = "Sovereign-28 Apex Omni Artifact v211.13"
     doc.author = "MarketOps Cloud - Forensic Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
@@ -147,9 +147,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", datetime.now(timezone.utc).isoformat())
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.10")
+    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.13")
     schema_version = payload.get("schema_version", "SO28-1.0")
-    scan_execution_id = payload.get("scan_execution_id", "SCAN-20260804-A91F83C2")
+    
+    scan_execution_id = payload.get("scan_execution_id", f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}")
     
     evidence_confidence = evidence_state.get("confidence", "TELEMETRY ONLY")
     risk_rating = "OBSERVATIONAL REVIEW REQUIRED" if evidence_confidence == "TELEMETRY ONLY" else "CONTROL EXCEPTION IDENTIFIED"
@@ -169,16 +170,16 @@ def generate_audit_pdf(payload: dict) -> bytes:
     h1 = seal_hash[:32]
     h2 = seal_hash[32:64]
     h3 = seal_hash[64:96]
-    formatted_hash = f"<b>SEGMENT 1:</b> {h1}<br/><b>SEGMENT 2:</b> {h2}<br/><b>SEGMENT 3:</b> {h3}"
-    artifact_id = f"SO28-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{seal_hash[:8]}"
+    formatted_hash = f"{h1}<br/>{h2}<br/>{h3}"
+    artifact_id = f"SO28-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{seal_hash[:8]}"
 
     evidence_objects_count = len(findings)
-    if evidence_objects_count == effective_findings_count and effective_findings_count > 0:
+    if evidence_objects_count == effective_findings_count and evidence_objects_count > 0:
         evidence_str = str(evidence_objects_count)
     elif evidence_objects_count > 0:
         evidence_str = str(evidence_objects_count)
     elif effective_findings_count > 0:
-        evidence_str = "PARTIAL - Payload objects omitted"
+        evidence_str = "NOT MATERIALIZED IN ARTIFACT"
     else:
         evidence_str = "0"
 
@@ -187,7 +188,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
     body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=11, textColor=colors.HexColor('#334155'))
     cli_style = ParagraphStyle('CLIStyle', parent=body_style, fontName='Courier', fontSize=6, leading=7.5, textColor=colors.HexColor('#0f172a'))
     kpi_style = ParagraphStyle('KPIStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=22, textColor=colors.HexColor('#16a34a'), alignment=1)
-    kpi_sub_style = ParagraphStyle('KPISub', parent=body_style, alignment=1, fontSize=7.5, leading=9.5, spaceBefore=8)
+    kpi_sub_style = ParagraphStyle('KPISub', parent=body_style, alignment=1, fontSize=8, leading=12, spaceBefore=4, spaceAfter=8)
 
     story.append(Paragraph("SOVEREIGN-28 APEX OMNI ARTIFACT", title_style))
     story.append(Paragraph("Institutional Forensic Control Plane & Governance Verification", ParagraphStyle('SubTitle', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
@@ -224,18 +225,18 @@ def generate_audit_pdf(payload: dict) -> bytes:
     if recovery > 0:
         kpi_display = f"<b>${recovery:,.2f} <font size=10 color='#15803d'>USD</font></b>"
     else:
-        kpi_display = "<b>$0.00 <font size=10 color='#15803d'>USD</font></b><br/><font size=6.5 color='#64748b'>NO VERIFIED FINANCIAL RECOVERY IDENTIFIED</font>"
+        kpi_display = "<b>$0.00 <font size=10 color='#15803d'>USD</font></b><br/><font size=6.5 color='#64748b'>NO QUANTIFIED RECOVERY OPPORTUNITY IDENTIFIED</font>"
 
     kpi_content = [
+        Paragraph("VALIDATED FINANCIAL RECOVERY OPPORTUNITY", kpi_sub_style),
         Paragraph(kpi_display, kpi_style),
-        Paragraph("ANNUALIZED CLOUD RECOVERY ESTIMATE", kpi_sub_style)
     ]
     t_kpi = Table([[kpi_content]], colWidths=[540])
     t_kpi.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#86efac')),
-        ('TOPPADDING', (0,0), (-1,-1), 12),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
+        ('TOPPADDING', (0,0), (-1,-1), 14),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 14),
     ]))
     story.append(t_kpi)
     story.append(Spacer(1, 6))
@@ -250,11 +251,11 @@ def generate_audit_pdf(payload: dict) -> bytes:
         ["Overall Governance Posture", risk_rating],
         ["Environment Classification", environment],
         ["Accounts Evaluated", str(account_count)],
-        ["Drift Vectors Isolated", str(effective_findings_count)],
+        ["Governance Signals Recorded", str(effective_findings_count)],
         ["Severity Classification", sev_str],
         ["Region Coverage Validation", f"{coverage_status} ({regions_str})"],
         ["Services Evaluated", services_str],
-        ["Telemetry Collection Status", evidence_state.get("collection_status", "COMPLETE")],
+        ["Telemetry Collection Status", evidence_state.get("collection_status", "OBSERVATION COMPLETE")],
         ["Scan Mode / IAM Authority", "Read-Only Observational Handshake (STS AssumeRole)"],
         ["Evidence Objects Collected", evidence_str],
         ["Evidence Confidence Level", evidence_confidence],
@@ -282,11 +283,6 @@ def generate_audit_pdf(payload: dict) -> bytes:
             f"The Sovereign-28 telemetry layer recorded <b>{effective_findings_count} governance review signals</b> "
             f"via {scope_phrase} through a read-only observational metadata handshake. Resource-level evidence objects were "
             "deferred during artifact generation and require validation before remediation."
-        )
-    elif evidence_confidence == "FULL":
-        narrative_text = (
-            f"The Sovereign-28 engine identified <b>{effective_findings_count} verified governance exceptions</b> "
-            f"supported by collected evidence objects across the evaluated AWS scope."
         )
     else:
         narrative_text = (
@@ -461,7 +457,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         story.append(t_reg)
     else:
         clean_box = [[
-            Paragraph("<b>FINDING STATUS: LOW - NO MATERIAL RISK IDENTIFIED</b><br/><br/>The Sovereign-28 engine completed multi-regional evaluation and identified no material governance drift or billable recovery opportunity requiring remediation.", body_style)
+            Paragraph("<b>OBSERVATION STATUS: NO MATERIAL GOVERNANCE SIGNALS DETECTED</b><br/><br/>Based on the evaluated telemetry scope, no actionable governance signals were identified requiring remediation.", body_style)
         ]]
         t_clean = Table(clean_box, colWidths=[540])
         t_clean.setStyle(TableStyle([
@@ -483,6 +479,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         "artifact_id": artifact_id,
         "scan_execution_id": scan_execution_id,
         "schema_version": schema_version,
+        "hash_algorithm": "SHA-384",
         "principal_account": principal,
         "assumed_role": assumed_role,
         "organization_id": org_id,
@@ -499,19 +496,31 @@ def generate_audit_pdf(payload: dict) -> bytes:
         "regions_evaluated": regions_list
     }
     
-    manifest_box = [
-        Preformatted(json.dumps(manifest_summary, indent=2, default=str), cli_style)
-    ]
-    t_manifest = Table([[manifest_box]], colWidths=[540])
-    t_manifest.setStyle(TableStyle([
+    # Safe multi-line paragraph pagination to eliminate JSON container clipping
+    manifest_json = json.dumps(manifest_summary, indent=2, default=str)
+    for line in manifest_json.splitlines():
+        story.append(Paragraph(escape(line).replace(" ", "&nbsp;"), cli_style))
+    
+    story.append(Spacer(1, 10))
+
+    # Professional Executive Conclusion Block
+    conclusion_text = (
+        "<b>EXECUTIVE CONCLUSION:</b><br/>"
+        "Sovereign-28 completed a non-destructive governance observation cycle. "
+        "The assessment produced cryptographically sealed telemetry evidence across the evaluated AWS scope. "
+        "No production modifications were performed. Resource-level remediation requires customer validation."
+    )
+    conclusion_box = [[Paragraph(conclusion_text, body_style)]]
+    t_conclusion = Table(conclusion_box, colWidths=[540])
+    t_conclusion.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
-        ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#94a3b8')),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#0284c7')),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING', (0,0), (-1,-1), 10),
+        ('RIGHTPADDING', (0,0), (-1,-1), 10),
     ]))
-    story.append(t_manifest)
+    story.append(t_conclusion)
 
     doc.build(story, onFirstPage=add_header_footer, onLaterPages=add_header_footer)
     buffer.seek(0)

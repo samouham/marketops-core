@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -9,33 +9,39 @@ from pdf_generator import generate_audit_pdf
 import hashlib
 import logging
 import os
+import re
 from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.11"
+    version="v211.13"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
-# PERMISSIVE CORS FIX: Allow all origins during beta/production frontend pairing
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
+origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 @app.options("/{full_path:path}")
 def options_preflight(full_path: str):
-    """Global OPTIONS preflight handler to prevent CORS blockages on any route."""
     return {"status": "ok"}
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "sovereign-backend-engine-v2"}
+
+@app.get("/version")
+def version_check():
+    return {"version": "v211.13", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -52,8 +58,9 @@ class RegistrationRequest(BaseModel):
 @app.post("/api/register-aws-customer")
 def register_aws_customer(payload: RegistrationRequest):
     try:
-        if not payload.arn or not payload.arn.startswith("arn:aws:iam::"):
-            raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format.")
+        arn_pattern = r"^arn:aws:iam::\d{12}:role\/[\w+=,.@\-_/]+$"
+        if not payload.arn or not re.match(arn_pattern, payload.arn):
+            raise HTTPException(status_code=400, detail="Invalid IAM Role ARN format or structure.")
         logger.info("Customer registration verified successfully.")
         return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn}
     except HTTPException as he:
@@ -63,7 +70,9 @@ def register_aws_customer(payload: RegistrationRequest):
         raise HTTPException(status_code=500, detail="Customer registration failed.")
 
 @app.post("/api/execute-scan")
-def api_execute_scan(payload: AuditRequest = AuditRequest()):
+def api_execute_scan(payload: Optional[AuditRequest] = Body(default=None)):
+    if payload is None:
+        payload = AuditRequest()
     try:
         regions = payload.regions if payload.regions else get_all_active_regions()
         return execute_full_audit(regions, payload.arn)
@@ -71,7 +80,7 @@ def api_execute_scan(payload: AuditRequest = AuditRequest()):
         raise he
     except Exception as e:
         logger.exception("Audit scan execution failed.")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Audit execution failed.")
 
 def get_all_active_regions():
     try:
@@ -145,7 +154,7 @@ def execute_full_audit(regions=None, arn=None):
         if len(parts) >= 5:
             principal_account = parts[4]
 
-    scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{hashlib.sha256(os.urandom(16)).hexdigest()[:8].upper()}"
+    scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f')[:-3]}"
 
     envelope = {
         "schema_version": "SO28-1.0",
@@ -173,8 +182,8 @@ def execute_full_audit(regions=None, arn=None):
             "scanner_manifest": scanner_manifest
         },
         "evidence_state": {
-            "collection_status": "COMPLETE",
-            "confidence": "FULL" if unique_findings else "TELEMETRY ONLY",
+            "collection_status": "OBSERVATION COMPLETE",
+            "confidence": "TELEMETRY ONLY",
             "finding_objects_present": bool(unique_findings)
         },
         "findings": [f.to_dict() for f in unique_findings]
