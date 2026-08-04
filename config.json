@@ -1,7 +1,7 @@
 {
   "AutoDeploymentsEnabled": true,
   "ImageRepository": {
-    "ImageIdentifier": "778367658348.dkr.ecr.us-east-1.amazonaws.com/sovereign-28-repo@",
+    "ImageIdentifier": "778367658348.dkr.ecr.us-east-1.amazonaws.com/sovereign-28-repo@sha256:90640d0b103a27cad14c295c1f6aee812e3ced1a35be7d3a48e0599852a138f2",
     "ImageRepositoryType": "ECR",
     "ImageConfiguration": {
       "Port": "8000"
