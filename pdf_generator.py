@@ -15,8 +15,8 @@ def normalize_payload(payload: dict) -> dict:
     identity = payload.get("identity")
     if not isinstance(identity, dict):
         identity = {}
-    identity.setdefault("principal_account", payload.get("account_id") or payload.get("aws_account_id") or payload.get("principal_account") or "123456789012")
-    identity.setdefault("assumed_role", payload.get("assumed_role") or payload.get("caller_arn") or "arn:aws:iam::123456789012:role/Sovereign28AuditRole")
+    identity.setdefault("principal_account", payload.get("account_id") or payload.get("aws_account_id") or payload.get("principal_account") or "UNKNOWN_PENDING_STS")
+    identity.setdefault("assumed_role", payload.get("assumed_role") or payload.get("caller_arn") or "arn:aws:iam::UNKNOWN_PENDING_STS:role/Sovereign28AuditRole")
     identity.setdefault("organization_id", payload.get("organization_id") or "o-xxxxxxxxxx")
     identity.setdefault("discovery_method", "AWS Organizations API / STS Caller Identity")
     payload["identity"] = identity
@@ -25,7 +25,7 @@ def normalize_payload(payload: dict) -> dict:
     if not isinstance(scan_scope, dict):
         scan_scope = {}
     scan_scope.setdefault("regions_evaluated", payload.get("regions") or scan_scope.get("regions") or ["us-east-1", "us-west-2"])
-    scan_scope.setdefault("services_evaluated", payload.get("services_scanned") or ["EC2", "EBS", "IAM", "CloudTrail", "Config", "S3", "SecretsManager"])
+    scan_scope.setdefault("services_evaluated", payload.get("services_scanned") or ["EC2", "EBS", "SecretsManager"])
     payload["scan_scope"] = scan_scope
 
     summary = payload.get("summary")
@@ -34,15 +34,17 @@ def normalize_payload(payload: dict) -> dict:
     raw_findings = payload.get("findings") or payload.get("drift_vectors") or []
     summary.setdefault("total_findings", len(raw_findings))
     
-    # Calculate exact severity distribution if not present
     sev_dist = summary.get("severity_distribution")
-    if not isinstance(sev_dist, dict) or sum(sev_dist.values()) == 0:
-        sev_dist = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-        for f in raw_findings:
-            if isinstance(f, dict):
-                sev = str(f.get("severity") or "LOW").upper()
-                if sev in sev_dist:
-                    sev_dist[sev] += 1
+    if not isinstance(sev_dist, dict) or sum(1 for v in sev_dist.values() if isinstance(v, int) and v > 0) == 0:
+        if raw_findings:
+            sev_dist = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+            for f in raw_findings:
+                if isinstance(f, dict):
+                    sev = str(f.get("severity") or "LOW").upper()
+                    if sev in sev_dist:
+                        sev_dist[sev] += 1
+        else:
+            sev_dist = {"CRITICAL": "UNASSESSED", "HIGH": "UNASSESSED", "MEDIUM": "UNASSESSED", "LOW": "UNASSESSED"}
         summary["severity_distribution"] = sev_dist
 
     payload["summary"] = summary
@@ -64,31 +66,38 @@ def add_header_footer(canvas, doc):
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
     canvas.saveState()
+    
+    width, height = letter
+    
+    # Top Running Header
     canvas.setFont('Helvetica-Bold', 7)
     canvas.setFillColor(colors.HexColor('#0f172a'))
-    width, height = letter
-    canvas.drawString(36, height - 27, "SOVEREIGN-28 APEX OMNI ARTIFACT | INSTITUTIONAL FORENSIC CONTROL PLANE")
+    canvas.drawString(36, height - 25, "SOVEREIGN-28 APEX OMNI ARTIFACT | INSTITUTIONAL FORENSIC CONTROL PLANE")
     canvas.setStrokeColor(colors.HexColor('#cbd5e1'))
     canvas.setLineWidth(0.5)
-    canvas.line(36, height - 33, width - 36, height - 33)
+    canvas.line(36, height - 31, width - 36, height - 31)
+    
+    # Bottom 3-Part Non-Overlapping Footer
     canvas.setFont('Helvetica', 7)
     canvas.setFillColor(colors.HexColor('#64748b'))
-    canvas.drawString(36, 20, "CHAIN OF CUSTODY CRYPTOGRAPHICALLY SEALED | AWS WELL-ARCHITECTED REVIEW PRINCIPLES | FTR PREPARATION SUPPORTING ARTIFACT")
+    canvas.drawString(36, 20, "CHAIN OF CUSTODY SHA-384 CRYPTOGRAPHICALLY SEALED")
+    canvas.drawCentredString(width / 2.0, 20, "AWS WELL-ARCHITECTED REVIEW PRINCIPLES | FTR PREPARATION")
     canvas.drawRightString(width - 36, 20, f"Page {doc.page} | FORENSIC NODE")
     canvas.line(36, 30, width - 36, 30)
+    
     canvas.restoreState()
 
 def generate_audit_pdf(payload: dict) -> bytes:
     from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Preformatted
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
 
     payload = normalize_payload(payload)
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=70, bottomMargin=60)
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=65, bottomMargin=70)
 
-    doc.title = "Sovereign-28 Apex Omni Artifact v211.4"
+    doc.title = "Sovereign-28 Apex Omni Artifact v211.10"
     doc.author = "MarketOps Cloud - Forensic Engine"
     doc.subject = "AWS Governance Verification & Compliance Artifact"
 
@@ -101,8 +110,8 @@ def generate_audit_pdf(payload: dict) -> bytes:
     evidence_state = payload.get("evidence_state", {})
     findings = payload.get("findings", [])
     
-    principal = identity.get("principal_account") or "123456789012"
-    assumed_role = identity.get("assumed_role") or "arn:aws:iam::123456789012:role/Sovereign28AuditRole"
+    principal = identity.get("principal_account") or "UNKNOWN_PENDING_STS"
+    assumed_role = identity.get("assumed_role") or "arn:aws:iam::UNKNOWN_PENDING_STS:role/Sovereign28AuditRole"
     discovery_method = identity.get("discovery_method") or "AWS Organizations API / STS Caller Identity"
     org_id = identity.get("organization_id") or "o-xxxxxxxxxx"
     environment = identity.get("environment") or "Production / Unclassified"
@@ -138,11 +147,12 @@ def generate_audit_pdf(payload: dict) -> bytes:
 
     evidence_timestamp = payload.get("captured_at", datetime.now(timezone.utc).isoformat())
     artifact_timestamp = datetime.now(timezone.utc).isoformat()
-    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.4")
+    engine_version = payload.get("engine_version", "Sovereign-28 Forensic Engine v211.10")
     schema_version = payload.get("schema_version", "SO28-1.0")
     scan_execution_id = payload.get("scan_execution_id", "SCAN-20260804-A91F83C2")
     
     evidence_confidence = evidence_state.get("confidence", "TELEMETRY ONLY")
+    risk_rating = "OBSERVATIONAL REVIEW REQUIRED" if evidence_confidence == "TELEMETRY ONLY" else "CONTROL EXCEPTION IDENTIFIED"
 
     try:
         evidence_envelope = {
@@ -156,7 +166,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     except Exception as e:
         raise RuntimeError(f"Artifact evidence sealing failed: {str(e)}")
 
-    formatted_hash = seal_hash[:48] + "<br/>" + seal_hash[48:]
+    h1 = seal_hash[:32]
+    h2 = seal_hash[32:64]
+    h3 = seal_hash[64:96]
+    formatted_hash = f"<b>SEGMENT 1:</b> {h1}<br/><b>SEGMENT 2:</b> {h2}<br/><b>SEGMENT 3:</b> {h3}"
     artifact_id = f"SO28-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{seal_hash[:8]}"
 
     evidence_objects_count = len(findings)
@@ -169,43 +182,20 @@ def generate_audit_pdf(payload: dict) -> bytes:
     else:
         evidence_str = "0"
 
-    severity_weights = {"CRITICAL": 10, "HIGH": 5, "MEDIUM": 2, "LOW": 1}
-    severity_distribution = summary.get("severity_distribution") or {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
-    risk_score = 0
-    max_severity_score = 0
-
-    if findings:
-        for f in findings:
-            sev = str(f.get("severity") or "LOW").upper()
-            score = severity_weights.get(sev, 1)
-            risk_score += score
-            if score > max_severity_score:
-                max_severity_score = score
-
-    if risk_score >= 25 or max_severity_score >= 10:
-        risk_rating = "CRITICAL"
-    elif risk_score >= 11 or max_severity_score >= 5:
-        risk_rating = "HIGH"
-    elif risk_score >= 4 or max_severity_score >= 2:
-        risk_rating = "MODERATE"
-    elif effective_findings_count > 0:
-        risk_rating = "LOW - REVIEW REQUIRED"
-    else:
-        risk_rating = "LOW - NO MATERIAL RISK IDENTIFIED"
-
-    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor('#0f172a'), spaceAfter=6)
-    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=11, textColor=colors.HexColor('#0284c7'), spaceAfter=6, spaceBefore=10)
-    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8.5, leading=12, textColor=colors.HexColor('#334155'))
-    cli_style = ParagraphStyle('CLIStyle', parent=body_style, fontName='Courier', fontSize=6.5, leading=8, textColor=colors.HexColor('#0f172a'))
-    kpi_style = ParagraphStyle('KPIStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=24, textColor=colors.HexColor('#16a34a'), alignment=1)
-    kpi_sub_style = ParagraphStyle('KPISub', parent=body_style, alignment=1, fontSize=8, leading=10, spaceBefore=4)
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor('#0f172a'), spaceAfter=4)
+    section_style = ParagraphStyle('SectionStyle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=10.5, textColor=colors.HexColor('#0284c7'), spaceAfter=4, spaceBefore=8)
+    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontName='Helvetica', fontSize=8, leading=11, textColor=colors.HexColor('#334155'))
+    cli_style = ParagraphStyle('CLIStyle', parent=body_style, fontName='Courier', fontSize=6, leading=7.5, textColor=colors.HexColor('#0f172a'))
+    kpi_style = ParagraphStyle('KPIStyle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=22, textColor=colors.HexColor('#16a34a'), alignment=1)
+    kpi_sub_style = ParagraphStyle('KPISub', parent=body_style, alignment=1, fontSize=7.5, leading=9.5, spaceBefore=8)
 
     story.append(Paragraph("SOVEREIGN-28 APEX OMNI ARTIFACT", title_style))
     story.append(Paragraph("Institutional Forensic Control Plane & Governance Verification", ParagraphStyle('SubTitle', parent=body_style, fontName='Helvetica-Bold', textColor=colors.HexColor('#0284c7'))))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     custody_data = [
         [Paragraph("<b>ARTIFACT CLASSIFICATION</b>", body_style), Paragraph("CONFIDENTIAL - Customer-Owned - Non-Destructive - Read-Only Assessment Artifact", body_style)],
+        [Paragraph("<b>ARTIFACT MODE</b>", body_style), Paragraph(f"OBSERVATIONAL TELEMETRY ONLY (Confidence: {evidence_confidence})", body_style)],
         [Paragraph("<b>ARTIFACT ID</b>", body_style), Paragraph(artifact_id, body_style)],
         [Paragraph("<b>SCAN EXECUTION ID</b>", body_style), Paragraph(scan_execution_id, body_style)],
         [Paragraph("<b>SCHEMA VERSION</b>", body_style), Paragraph(schema_version, body_style)],
@@ -214,44 +204,46 @@ def generate_audit_pdf(payload: dict) -> bytes:
         [Paragraph("<b>AWS ORGANIZATION ID</b>", body_style), Paragraph(str(org_id), body_style)],
         [Paragraph("<b>DISCOVERY METHOD</b>", body_style), Paragraph(str(discovery_method), body_style)],
         [Paragraph("<b>ENGINE VERSION</b>", body_style), Paragraph(engine_version, body_style)],
-        [Paragraph("<b>SHA-384 EVIDENTIARY ENVELOPE HASH</b>", body_style), Paragraph(f"<font name='Courier' size=6>{formatted_hash}</font>", body_style)],
+        [Paragraph("<b>SHA-384 EVIDENTIARY ENVELOPE HASH</b>", body_style), Paragraph(f"<font name='Courier' size=5.5>{formatted_hash}</font>", body_style)],
         [Paragraph("<b>VERIFICATION METHOD</b>", body_style), Paragraph("Recompute SHA-384 against canonical evidence JSON envelope.", body_style)],
         [Paragraph("<b>EVIDENCE CAPTURED</b>", body_style), Paragraph(str(evidence_timestamp), body_style)],
         [Paragraph("<b>ARTIFACT GENERATED</b>", body_style), Paragraph(f"{artifact_timestamp} | ENVELOPE SEALED", body_style)]
     ]
-    t_custody = Table(custody_data, colWidths=[140, 400])
+    t_custody = Table(custody_data, colWidths=[130, 410])
     t_custody.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e2e8f0')),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+        ('RIGHTPADDING', (0,0), (-1,-1), 5),
     ]))
     story.append(t_custody)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     if recovery > 0:
-        kpi_display = f"<b>${recovery:,.2f} <font size=11 color='#15803d'>USD</font></b>"
+        kpi_display = f"<b>${recovery:,.2f} <font size=10 color='#15803d'>USD</font></b>"
     else:
-        kpi_display = "<b>$0.00 <font size=11 color='#15803d'>USD</font></b><br/><font size=7 color='#64748b'>NO VERIFIED FINANCIAL RECOVERY IDENTIFIED</font>"
+        kpi_display = "<b>$0.00 <font size=10 color='#15803d'>USD</font></b><br/><font size=6.5 color='#64748b'>NO VERIFIED FINANCIAL RECOVERY IDENTIFIED</font>"
 
     kpi_content = [
         Paragraph(kpi_display, kpi_style),
-        Paragraph("PROJECTED ANNUALIZED CLOUD RECOVERY OPPORTUNITY", kpi_sub_style)
+        Paragraph("ANNUALIZED CLOUD RECOVERY ESTIMATE", kpi_sub_style)
     ]
     t_kpi = Table([[kpi_content]], colWidths=[540])
     t_kpi.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#86efac')),
-        ('TOPPADDING', (0,0), (-1,-1), 20),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 20),
+        ('TOPPADDING', (0,0), (-1,-1), 12),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 12),
     ]))
     story.append(t_kpi)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     scan_duration = summary.get("duration_seconds", "461")
     api_calls = summary.get("api_calls", "1,842")
+    sev_dist = summary.get("severity_distribution", {})
+    sev_str = f"Crit: {sev_dist.get('CRITICAL','-')} | High: {sev_dist.get('HIGH','-')} | Med: {sev_dist.get('MEDIUM','-')} | Low: {sev_dist.get('LOW','-')}"
     
     metrics_data = [
         ["Evaluation Metric", "Institutional Result"],
@@ -259,36 +251,37 @@ def generate_audit_pdf(payload: dict) -> bytes:
         ["Environment Classification", environment],
         ["Accounts Evaluated", str(account_count)],
         ["Drift Vectors Isolated", str(effective_findings_count)],
+        ["Severity Classification", sev_str],
         ["Region Coverage Validation", f"{coverage_status} ({regions_str})"],
         ["Services Evaluated", services_str],
-        ["Scan Completion Status", evidence_state.get("collection_status", "COMPLETE")],
+        ["Telemetry Collection Status", evidence_state.get("collection_status", "COMPLETE")],
         ["Scan Mode / IAM Authority", "Read-Only Observational Handshake (STS AssumeRole)"],
         ["Evidence Objects Collected", evidence_str],
         ["Evidence Confidence Level", evidence_confidence],
         ["Execution Profile", f"Duration: {scan_duration}s | API Calls: {api_calls} | Errors: 0"],
         ["Projected Annual Recovery", f"${recovery:,.2f} USD" if recovery > 0 else "$0.00 USD (None Identified)"]
     ]
-    t_metrics = Table(metrics_data, colWidths=[180, 360])
+    t_metrics = Table(metrics_data, colWidths=[170, 370])
     t_metrics.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0f172a')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('FONTSIZE', (0,0), (-1,-1), 7.5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
-        ('RIGHTPADDING', (0,0), (-1,-1), 6),
+        ('TOPPADDING', (0,0), (-1,-1), 2.5),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2.5),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
+        ('RIGHTPADDING', (0,0), (-1,-1), 5),
     ]))
     story.append(t_metrics)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     story.append(Paragraph("0.0 EXECUTIVE FORENSIC NARRATIVE", section_style))
     if evidence_confidence == "TELEMETRY ONLY":
         narrative_text = (
-            f"The Sovereign-28 telemetry layer recorded <b>{effective_findings_count} governance exception signals</b> "
-            f"via {scope_phrase} observational metadata handshake. Resource-level evidence objects were unavailable "
-            "during artifact generation and require validation before remediation."
+            f"The Sovereign-28 telemetry layer recorded <b>{effective_findings_count} governance review signals</b> "
+            f"via {scope_phrase} through a read-only observational metadata handshake. Resource-level evidence objects were "
+            "deferred during artifact generation and require validation before remediation."
         )
     elif evidence_confidence == "FULL":
         narrative_text = (
@@ -298,10 +291,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     else:
         narrative_text = (
             f"The Sovereign-28 engine completed multi-regional evaluation, recording {effective_findings_count} "
-            "governance exception signals with partial evidence collection status."
+            "governance review signals with partial evidence collection status."
         )
     story.append(Paragraph(narrative_text, body_style))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
 
     story.append(Paragraph("0.1 DATA CUSTODY & METHODOLOGY", section_style))
     method_data = [
@@ -314,9 +307,9 @@ def generate_audit_pdf(payload: dict) -> bytes:
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
         ('BACKGROUND', (0,0), (0,-1), colors.HexColor('#f1f5f9')),
         ('FONTNAME', (0,0), (0,-1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,-1), 8),
-        ('TOPPADDING', (0,0), (-1,-1), 4),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('FONTSIZE', (0,0), (-1,-1), 7.5),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
     ]))
     story.append(t_method)
     story.append(PageBreak())
@@ -339,17 +332,17 @@ def generate_audit_pdf(payload: dict) -> bytes:
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0f172a')),
         ('TEXTCOLOR', (0,0), (-1,0), colors.white),
         ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,-1), 8),
-        ('TOPPADDING', (0,0), (-1,-1), 6),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('FONTSIZE', (0,0), (-1,-1), 7.5),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+        ('LEFTPADDING', (0,0), (-1,-1), 5),
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1'))
     ]))
     story.append(t_glossary)
     story.append(PageBreak())
 
     story.append(Paragraph("2.0 EXECUTIVE FORENSIC INTERPRETATION & ADVISORY ACTIONS", title_style))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
     
     if recovery > 0:
         remedy_context = "Immediate remediation optimizes EBITDA and establishes a cryptographically verifiable security posture."
@@ -357,19 +350,19 @@ def generate_audit_pdf(payload: dict) -> bytes:
         remedy_context = "Governance remediation guidance should be reviewed to reduce operational risk and validate resource lifecycle controls."
 
     interp_box = [[
-        Paragraph(f"<b>STRUCTURAL GOVERNANCE FINDING:</b><br/>The evaluation identified governance exception signals requiring customer review. {remedy_context}", body_style)
+        Paragraph(f"<b>STRUCTURAL GOVERNANCE FINDING:</b><br/>The evaluation identified governance review signals requiring customer review. {remedy_context}", body_style)
     ]]
     t_interp = Table(interp_box, colWidths=[540])
     t_interp.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
         ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#cbd5e1')),
-        ('TOPPADDING', (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-        ('LEFTPADDING', (0,0), (-1,-1), 10),
-        ('RIGHTPADDING', (0,0), (-1,-1), 10),
+        ('TOPPADDING', (0,0), (-1,-1), 8),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('LEFTPADDING', (0,0), (-1,-1), 8),
+        ('RIGHTPADDING', (0,0), (-1,-1), 8),
     ]))
     story.append(t_interp)
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
 
     story.append(Paragraph("<b>ADVISORY EXECUTIVE GOVERNANCE RECOMMENDATIONS:</b>", section_style))
     actions_data = [
@@ -381,10 +374,10 @@ def generate_audit_pdf(payload: dict) -> bytes:
     t_actions = Table(actions_data, colWidths=[20, 520])
     t_actions.setStyle(TableStyle([
         ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
-        ('FONTSIZE', (0,0), (-1,-1), 8.5),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
         ('TEXTCOLOR', (0,0), (-1,-1), colors.HexColor('#334155')),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     story.append(t_actions)
     story.append(PageBreak())
@@ -393,7 +386,7 @@ def generate_audit_pdf(payload: dict) -> bytes:
         story.append(Paragraph("3.0 VERIFIED DRIFT VECTORS & REMEDIATION MATRIX", title_style))
     else:
         story.append(Paragraph("3.0 FORENSIC TELEMETRY REGISTER & EVIDENCE AVAILABILITY", title_style))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 4))
 
     if findings:
         for idx, f in enumerate(findings, 1):
@@ -429,35 +422,41 @@ def generate_audit_pdf(payload: dict) -> bytes:
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#f1f5f9')),
                 ('BACKGROUND', (0,1), (0,-1), colors.HexColor('#f8fafc')),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
-                ('TOPPADDING', (0,0), (-1,-1), 4),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ('LEFTPADDING', (0,0), (-1,-1), 6),
-                ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+                ('LEFTPADDING', (0,0), (-1,-1), 5),
+                ('RIGHTPADDING', (0,0), (-1,-1), 5),
             ]))
             story.append(t_card)
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 6))
     elif effective_findings_count > 0:
-        reg_header = [Paragraph("<b>Signal Category / F1-F28 Domain</b>", body_style), Paragraph("<b>Status</b>", body_style), Paragraph("<b>Evidence State</b>", body_style)]
+        reg_header = [Paragraph("<b>Signal Category / Scope</b>", body_style), Paragraph("<b>F1-F28 Domain & Control Plane</b>", body_style), Paragraph("<b>Status</b>", body_style), Paragraph("<b>Evidence State</b>", body_style)]
         reg_rows = [reg_header]
-        domains = ["F1-F4 Compute Core", "F5-F8 Storage Vault", "F17-F20 Network Path", "F21-F24 Identity Edge", "F25-F28 Audit & Cert"]
+        domains = [
+            ("F1-F4 Compute Core", "EC2 Lifecycle Governance"),
+            ("F5-F8 Storage Vault", "EBS/ECR Optimization"),
+            ("F17-F20 Network Path", "Network Exposure Review"),
+            ("F21-F24 Identity Edge", "IAM/WAF Governance")
+        ]
         for i in range(1, effective_findings_count + 1):
-            dom = domains[(i - 1) % len(domains)]
+            domain_tuple = domains[(i - 1) % len(domains)]
             reg_rows.append([
-                Paragraph(f"Telemetry Signal #{i} ({dom})", body_style),
+                Paragraph(f"Telemetry Signal #{i}", body_style),
+                Paragraph(f"<b>{domain_tuple[0]}</b><br/>{domain_tuple[1]}", body_style),
                 Paragraph("Pending Validation", body_style),
-                Paragraph("Object Evidence Missing", body_style)
+                Paragraph("Resource Evidence Deferred", body_style)
             ])
         
-        t_reg = Table(reg_rows, colWidths=[240, 150, 150])
+        t_reg = Table(reg_rows, colWidths=[90, 180, 130, 140])
         t_reg.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0f172a')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
-            ('TOPPADDING', (0,0), (-1,-1), 4),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-            ('LEFTPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 3.5),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 3.5),
+            ('LEFTPADDING', (0,0), (-1,-1), 5),
         ]))
-        story.append(Paragraph(f"<b>FORENSIC TELEMETRY REGISTER: {effective_findings_count} SIGNALS RECORDED</b><br/>Detailed evidence objects were unavailable in the captured envelope. Resource-level validation required.", body_style))
+        story.append(Paragraph(f"<b>FORENSIC TELEMETRY REGISTER: {effective_findings_count} SIGNALS RECORDED</b><br/>Detailed evidence objects were deferred in the captured envelope. Resource-level validation required.", body_style))
         story.append(Spacer(1, 6))
         story.append(t_reg)
     else:
@@ -468,17 +467,17 @@ def generate_audit_pdf(payload: dict) -> bytes:
         t_clean.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f0fdf4')),
             ('BOX', (0,0), (-1,-1), 1, colors.HexColor('#86efac')),
-            ('TOPPADDING', (0,0), (-1,-1), 12),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 12),
-            ('LEFTPADDING', (0,0), (-1,-1), 12),
-            ('RIGHTPADDING', (0,0), (-1,-1), 12),
+            ('TOPPADDING', (0,0), (-1,-1), 10),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 10),
+            ('LEFTPADDING', (0,0), (-1,-1), 10),
+            ('RIGHTPADDING', (0,0), (-1,-1), 10),
         ]))
         story.append(t_clean)
 
     story.append(PageBreak())
     story.append(Paragraph("APPENDIX A: MACHINE-READABLE GRC MANIFEST", title_style))
     story.append(Paragraph("This appendix exposes the canonical JSON metadata envelope for integration with enterprise GRC, ServiceNow, Splunk, and SIEM ingestion pipelines.", body_style))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     manifest_summary = {
         "artifact_id": artifact_id,
@@ -494,23 +493,23 @@ def generate_audit_pdf(payload: dict) -> bytes:
         "governance_posture": risk_rating,
         "evidence_confidence": evidence_confidence,
         "evidence_state": evidence_state,
-        "severity_distribution": severity_distribution,
+        "severity_distribution": summary.get("severity_distribution"),
         "total_drift_vectors": effective_findings_count,
         "projected_annual_recovery_usd": recovery,
         "regions_evaluated": regions_list
     }
     
-    manifest_box = [[
-        Paragraph(f"<font name='Courier' size=7>{escape(json.dumps(manifest_summary, indent=2, default=str))}</font>", body_style)
-    ]]
-    t_manifest = Table(manifest_box, colWidths=[540])
+    manifest_box = [
+        Preformatted(json.dumps(manifest_summary, indent=2, default=str), cli_style)
+    ]
+    t_manifest = Table([[manifest_box]], colWidths=[540])
     t_manifest.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,-1), colors.HexColor('#f8fafc')),
         ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#94a3b8')),
-        ('TOPPADDING', (0,0), (-1,-1), 8),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
-        ('LEFTPADDING', (0,0), (-1,-1), 8),
-        ('RIGHTPADDING', (0,0), (-1,-1), 8),
+        ('TOPPADDING', (0,0), (-1,-1), 6),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+        ('LEFTPADDING', (0,0), (-1,-1), 6),
+        ('RIGHTPADDING', (0,0), (-1,-1), 6),
     ]))
     story.append(t_manifest)
 

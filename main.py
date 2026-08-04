@@ -13,16 +13,19 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.4"
+    version="v211.10"
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sovereign-backend")
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "https://marketopscloud.com,http://localhost:3000")
+origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -63,8 +66,8 @@ def register_aws_customer(payload: RegistrationRequest):
         logger.info("Customer registration verified successfully.")
         return {"status": "VERIFIED", "message": "Established successfully.", "arn": payload.arn}
     except Exception as e:
-        logger.error("Customer registration fault encountered.")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Customer registration fault encountered.")
+        raise HTTPException(status_code=500, detail="Customer registration failed.")
 
 @app.post("/api/execute-scan")
 def api_execute_scan(payload: AuditRequest = AuditRequest()):
@@ -72,7 +75,8 @@ def api_execute_scan(payload: AuditRequest = AuditRequest()):
         regions = payload.regions if payload.regions else get_all_active_regions()
         return execute_full_audit(regions, payload.arn)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Audit scan execution failed.")
+        raise HTTPException(status_code=500, detail="Audit execution failed.")
 
 def get_all_active_regions():
     try:
@@ -80,6 +84,7 @@ def get_all_active_regions():
         response = ec2_client.describe_regions(AllRegions=False)
         return sorted([r["RegionName"] for r in response.get("Regions", [])])
     except Exception as e:
+        logger.warning(f"Region discovery fallback triggered: {e}")
         return ["us-east-1", "us-west-2", "eu-west-1"]
 
 def deduplicate_findings(raw_findings):
@@ -103,14 +108,11 @@ def execute_full_audit(regions=None, arn=None):
         regions = get_all_active_regions()
         
     raw_findings = []
+    executed_services = []
     scanner_manifest = {
         "EC2": {"status": "PENDING", "findings": 0},
         "EBS": {"status": "PENDING", "findings": 0},
-        "IAM": {"status": "PENDING", "findings": 0},
-        "SecretsManager": {"status": "PENDING", "findings": 0},
-        "CloudTrail": {"status": "PENDING", "findings": 0},
-        "Config": {"status": "PENDING", "findings": 0},
-        "S3": {"status": "PENDING", "findings": 0}
+        "SecretsManager": {"status": "PENDING", "findings": 0}
     }
 
     try:
@@ -119,6 +121,7 @@ def execute_full_audit(regions=None, arn=None):
         scanner_manifest["EC2"]["status"] = "COMPLETED"
         scanner_manifest["EC2"]["findings"] = len(ec2_findings)
         scanner_manifest["EBS"]["status"] = "COMPLETED"
+        executed_services.extend(["EC2", "EBS"])
     except Exception as e:
         scanner_manifest["EC2"]["status"] = f"FAILED: {e}"
 
@@ -127,26 +130,21 @@ def execute_full_audit(regions=None, arn=None):
         raw_findings.extend(secrets_findings)
         scanner_manifest["SecretsManager"]["status"] = "COMPLETED"
         scanner_manifest["SecretsManager"]["findings"] = len(secrets_findings)
+        executed_services.append("SecretsManager")
     except Exception as e:
         scanner_manifest["SecretsManager"]["status"] = f"FAILED: {e}"
-
-    # Mark remaining compliance planes as observational handshake complete
-    for plane in ["IAM", "CloudTrail", "Config", "S3"]:
-        scanner_manifest[plane]["status"] = "COMPLETED"
 
     unique_findings = deduplicate_findings(raw_findings)
     total_recovery = sum(f.annual_recovery for f in unique_findings)
 
-    # Derive strict severity distribution
     sev_dist = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
     for f in unique_findings:
         sev = getattr(f, "severity", "LOW").upper()
         if sev in sev_dist:
             sev_dist[sev] += 1
 
-    # Extract principal account & role from arn if provided
-    principal_account = "123456789012"
-    assumed_role = arn if arn else "arn:aws:iam::123456789012:role/Sovereign28AuditRole"
+    principal_account = "UNKNOWN_PENDING_STS"
+    assumed_role = arn if arn else "arn:aws:iam::UNKNOWN_PENDING_STS:role/Sovereign28AuditRole"
     if arn and "::" in arn:
         parts = arn.split(":")
         if len(parts) >= 5:
@@ -154,7 +152,6 @@ def execute_full_audit(regions=None, arn=None):
 
     scan_execution_id = f"SCAN-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{hashlib.sha256(os.urandom(16)).hexdigest()[:8].upper()}"
 
-    # Construct strict SO28EvidenceEnvelope compliant with v211.4 contract
     envelope = {
         "schema_version": "SO28-1.0",
         "scan_execution_id": scan_execution_id,
@@ -168,7 +165,7 @@ def execute_full_audit(regions=None, arn=None):
         },
         "scan_scope": {
             "regions_evaluated": regions,
-            "services_evaluated": ["EC2", "EBS", "IAM", "SecretsManager", "CloudTrail", "Config", "S3"],
+            "services_evaluated": executed_services,
             "accounts_evaluated": [principal_account]
         },
         "summary": {
@@ -177,7 +174,7 @@ def execute_full_audit(regions=None, arn=None):
             "regions_evaluated": len(regions),
             "total_findings": len(unique_findings),
             "projected_annual_recovery_usd": round(total_recovery, 2),
-            "severity_distribution": sev_dist,
+            "severity_distribution": sev_dist if unique_findings else {"CRITICAL": "UNASSESSED", "HIGH": "UNASSESSED", "MEDIUM": "UNASSESSED", "LOW": "UNASSESSED"},
             "scanner_manifest": scanner_manifest
         },
         "evidence_state": {
@@ -190,12 +187,9 @@ def execute_full_audit(regions=None, arn=None):
 
     return envelope
 
-@app.post("/api/generate-pdf")
-@app.post("/api/generate-artifact")
-@app.api_route("/api/generate-artifact", methods=["GET"])
-async def generate_artifact_endpoint(request: Request):
+async def handle_artifact_generation(request: Request, is_post: bool):
     try:
-        if request.method == "POST":
+        if is_post:
             try:
                 payload = await request.json()
             except Exception:
@@ -211,8 +205,9 @@ async def generate_artifact_endpoint(request: Request):
             }
 
         pdf_bytes = generate_audit_pdf(payload)
-        if not pdf_bytes or len(pdf_bytes) < 100:
-            raise HTTPException(status_code=500, detail="Generated PDF stream is empty.")
+        
+        if not pdf_bytes or not pdf_bytes.startswith(b"%PDF"):
+            raise HTTPException(status_code=500, detail="Artifact failed server-side PDF signature validation.")
 
         return Response(
             content=pdf_bytes,
@@ -223,5 +218,17 @@ async def generate_artifact_endpoint(request: Request):
             }
         )
     except Exception as e:
-        logger.error(f"PDF generation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("PDF generation endpoint failure.")
+        raise HTTPException(status_code=500, detail="Artifact generation failed.")
+
+@app.post("/api/generate-pdf")
+async def generate_pdf(request: Request):
+    return await handle_artifact_generation(request, is_post=True)
+
+@app.post("/api/generate-artifact")
+async def generate_artifact_post(request: Request):
+    return await handle_artifact_generation(request, is_post=True)
+
+@app.get("/api/generate-artifact")
+async def generate_artifact_get(request: Request):
+    return await handle_artifact_generation(request, is_post=False)
