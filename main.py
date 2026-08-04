@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from engine import get_client
 from scanner import ec2, secrets
 from pdf_generator import generate_audit_pdf
@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Sovereign-28 Engine",
-    version="v211.19"
+    version="v211.20"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +39,14 @@ async def add_cors_headers_to_all_responses(request: Request, call_next):
                 "Access-Control-Allow-Headers": "*",
             }
         )
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.exception("Global exception caught by middleware.")
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Internal forensic engine exception handled."}
+        )
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "*"
     response.headers["Access-Control-Allow-Headers"] = "*"
@@ -51,15 +58,11 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.19", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.20", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
     return {"status": "active", "service": "sovereign-core"}
-
-class AuditRequest(BaseModel):
-    arn: Optional[str] = None
-    regions: Optional[List[str]] = None
 
 class RegistrationRequest(BaseModel):
     email: Optional[str] = None
@@ -80,15 +83,19 @@ def register_aws_customer(payload: RegistrationRequest):
         raise HTTPException(status_code=500, detail="Customer registration failed.")
 
 @app.post("/api/execute-scan")
-def api_execute_scan(payload: Optional[AuditRequest] = Body(default=None)):
+def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
+    """Accepts any raw JSON body from the frontend without strict Pydantic validation crashes."""
     try:
-        if payload is None:
-            payload = AuditRequest()
-        regions = payload.regions if payload.regions else get_all_active_regions()
-        return execute_full_audit(regions, payload.arn)
+        data = payload if isinstance(payload, dict) else {}
+        arn = data.get("arn")
+        regions = data.get("regions")
+        
+        if not regions:
+            regions = get_all_active_regions()
+            
+        return execute_full_audit(regions, arn)
     except Exception as e:
         logger.exception("Audit scan execution encountered exception, returning safe observational telemetry envelope.")
-        # Graceful fallback telemetry envelope to prevent UI 500 errors
         return {
             "schema_version": "SO28-1.0",
             "artifact_format_version": "SO28-AF-1.0",
