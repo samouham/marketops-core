@@ -82,7 +82,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Governance Engine",
-    version="v211.28"
+    version="v211.29"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -127,7 +127,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.28", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.29", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -188,7 +188,7 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
             },
             "scan_scope": {
                 "regions_evaluated": ["us-east-1", "us-west-2"],
-                "services_evaluated": ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
+                "control_domains_evaluated": ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
                 "accounts_evaluated": ["UNKNOWN_PENDING_STS"]
             },
             "summary": {
@@ -219,7 +219,7 @@ def get_all_active_regions():
         response = ec2_client.describe_regions(AllRegions=False)
         return sorted([r["RegionName"] for r in response.get("Regions", [])])
     except Exception as e:
-        logger.warning(f"Dynamic global region discovery failed, falling back to extended commercial scope: {e}")
+        logger.warning(f"Dynamic region discovery failed, falling back to extended commercial scope: {e}")
         return [
             "us-east-1", "us-east-2", "us-west-1", "us-west-2",
             "eu-west-1", "eu-central-1", "ap-southeast-1", "ap-northeast-1"
@@ -246,10 +246,10 @@ def execute_full_audit(regions=None, arn=None):
         regions = get_all_active_regions()
         
     raw_findings = []
-    executed_services = []
+    executed_domains = []
     scanner_manifest = {}
 
-    service_modules = {
+    control_domain_modules = {
         "EC2": ec2,
         "EBS": ebs,
         "RDS": rds,
@@ -264,25 +264,25 @@ def execute_full_audit(regions=None, arn=None):
         "SecurityGroups": security_groups
     }
 
-    for svc_name, svc_module in service_modules.items():
-        scanner_manifest[svc_name] = {"status": "PENDING", "findings": 0}
-        if svc_module is None:
-            scanner_manifest[svc_name]["status"] = "MODULE NOT FOUND"
+    for domain_name, domain_module in control_domain_modules.items():
+        scanner_manifest[domain_name] = {"status": "PENDING", "findings": 0}
+        if domain_module is None:
+            scanner_manifest[domain_name]["status"] = "MODULE NOT FOUND"
             continue
         try:
-            if hasattr(svc_module, "scan"):
-                svc_findings = svc_module.scan(get_client, regions)
-                if svc_findings:
-                    raw_findings.extend(svc_findings)
-                    scanner_manifest[svc_name]["findings"] = len(svc_findings)
-                scanner_manifest[svc_name]["status"] = "COMPLETED"
-                if svc_name not in executed_services:
-                    executed_services.append(svc_name)
+            if hasattr(domain_module, "scan"):
+                domain_findings = domain_module.scan(get_client, regions)
+                if domain_findings:
+                    raw_findings.extend(domain_findings)
+                    scanner_manifest[domain_name]["findings"] = len(domain_findings)
+                scanner_manifest[domain_name]["status"] = "COMPLETED"
+                if domain_name not in executed_domains:
+                    executed_domains.append(domain_name)
             else:
-                scanner_manifest[svc_name]["status"] = "NO SCAN METHOD"
+                scanner_manifest[domain_name]["status"] = "NO SCAN METHOD"
         except Exception as e:
-            scanner_manifest[svc_name]["status"] = f"OBSERVATIONAL ERROR: {e}"
-            logger.warning(f"Scanner module {svc_name} encountered exception: {e}")
+            scanner_manifest[domain_name]["status"] = f"OBSERVATIONAL ERROR: {e}"
+            logger.warning(f"Control domain module {domain_name} encountered exception: {e}")
 
     unique_findings = deduplicate_findings(raw_findings)
     total_recovery = sum(getattr(f, 'annual_recovery', 0.0) for f in unique_findings)
@@ -331,7 +331,7 @@ def execute_full_audit(regions=None, arn=None):
         },
         "scan_scope": {
             "regions_evaluated": regions,
-            "services_evaluated": executed_services if executed_services else ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
+            "control_domains_evaluated": executed_domains if executed_domains else list(control_domain_modules.keys()),
             "accounts_evaluated": [principal_account]
         },
         "summary": {
