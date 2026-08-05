@@ -82,7 +82,7 @@ from datetime import datetime, timezone
 
 app = FastAPI(
     title="MarketOps Cloud - Governance Engine",
-    version="v211.26"
+    version="v211.28"
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -127,7 +127,7 @@ def health_check():
 
 @app.get("/version")
 def version_check():
-    return {"version": "v211.26", "service": "sovereign-backend-engine-v2"}
+    return {"version": "v211.28", "service": "sovereign-backend-engine-v2"}
 
 @app.get("/")
 def root_check():
@@ -188,7 +188,7 @@ def api_execute_scan(payload: Optional[Dict[str, Any]] = Body(default=None)):
             },
             "scan_scope": {
                 "regions_evaluated": ["us-east-1", "us-west-2"],
-                "services_evaluated": ["EC2", "EBS", "SecretsManager"],
+                "services_evaluated": ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
                 "accounts_evaluated": ["UNKNOWN_PENDING_STS"]
             },
             "summary": {
@@ -331,7 +331,7 @@ def execute_full_audit(regions=None, arn=None):
         },
         "scan_scope": {
             "regions_evaluated": regions,
-            "services_evaluated": executed_services if executed_services else ["EC2", "EBS", "SecretsManager"],
+            "services_evaluated": executed_services if executed_services else ["EC2", "EBS", "RDS", "ECR", "ECS", "KMS", "SecretsManager", "Lambda", "WAF", "Config", "CloudTrail", "SecurityGroups"],
             "accounts_evaluated": [principal_account]
         },
         "summary": {
